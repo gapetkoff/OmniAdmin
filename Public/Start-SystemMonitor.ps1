@@ -1080,21 +1080,21 @@ function Start-SystemMonitor {
                         if ($k -eq 'Enter') {
                             $ShowMainMenu = $false
                             switch ($MenuIndex) {
-                                0 { $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false } # Live
-                                1 { $ServiceMode = $true; $UserMode = $false; $TaskMode = $false; $AppMode = $false }
-                                2 { $TaskMode = $true; $ServiceMode = $false; $UserMode = $false; $AppMode = $false }
-                                3 { $AppMode = $true; $TaskMode = $false; $ServiceMode = $false; $UserMode = $false }
-                                4 { $UserMode = $true; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false }
+                                0 { $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 2; $IsDesc = $true } # Live defaults to CPU desc
+                                1 { $ServiceMode = $true; $UserMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 1; $IsDesc = $false } # Services defaults to Name asc
+                                2 { $TaskMode = $true; $ServiceMode = $false; $UserMode = $false; $AppMode = $false; $SelColIndex = 1; $IsDesc = $false } # Tasks defaults to Task Name asc
+                                3 { $AppMode = $true; $TaskMode = $false; $ServiceMode = $false; $UserMode = $false; $SelColIndex = 0; $IsDesc = $false } # Installed Apps defaults to Name asc (A-Z)
+                                4 { $UserMode = $true; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 0; $IsDesc = $false } # Users defaults to Username asc
                                 5 { return }
                             }
                             $SvcRowIndex = 0; $TaskRowIndex = 0; $UserRowIndex = 0; $AppRowIndex = 0; $PageIndex = 0; $NeedsRedraw = $true; Clear-Host
                         }
                         # Hotkeys 1-5 and Q
-                        if ($k -eq 'D1') { $ShowMainMenu = $false; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D2') { $ShowMainMenu = $false; $ServiceMode=$true; $UserMode=$false; $TaskMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D3') { $ShowMainMenu = $false; $TaskMode=$true; $ServiceMode=$false; $UserMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D4') { $ShowMainMenu = $false; $AppMode=$true; $TaskMode=$false; $ServiceMode=$false; $UserMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D5') { $ShowMainMenu = $false; $UserMode=$true; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D1') { $ShowMainMenu = $false; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 2; $IsDesc = $true; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D2') { $ShowMainMenu = $false; $ServiceMode=$true; $UserMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 1; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D3') { $ShowMainMenu = $false; $TaskMode=$true; $ServiceMode=$false; $UserMode=$false; $AppMode=$false; $SelColIndex = 1; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D4') { $ShowMainMenu = $false; $AppMode=$true; $TaskMode=$false; $ServiceMode=$false; $UserMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D5') { $ShowMainMenu = $false; $UserMode=$true; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
                         if ($k -eq 'Q')  { return }
                     }
                     Start-Sleep -Milliseconds 50
