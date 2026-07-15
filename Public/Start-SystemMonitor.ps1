@@ -175,6 +175,11 @@ function Start-SystemMonitor {
 
     #region 5. UI MAIN LOOP
         while ($true) {
+            # Dynamically calculate header height based on visible elements
+            $HEADER_HEIGHT = 10
+            if ($SyncHash.StaticData -and $SyncHash.StaticData.GpuName) { $HEADER_HEIGHT += 3 }
+            if ($Diagnostics) { $HEADER_HEIGHT += 1 }
+
             $SyncHash.UserModeActive = $UserMode
             $SyncHash.ServiceModeActive = ($ServiceMode -and -not $ShowServiceProps)
             $SyncHash.TaskModeActive = ($TaskMode -and -not $ShowTaskProps)
@@ -248,7 +253,7 @@ function Start-SystemMonitor {
                         "DownArrow"  { if ($SvcRowIndex -lt ($ItemsOnPage - 1)) { $SvcRowIndex++ } }
                         "S" { 
                              try { [Console]::CursorVisible = $true } catch {}
-                             [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1)
+                             try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
                              Write-Host " SEARCH: " -NoNewline -ForegroundColor Cyan
                              $FilterText = Read-Host
                              $PageIndex = 0; $SvcRowIndex = 0
@@ -297,7 +302,7 @@ function Start-SystemMonitor {
                         
                         "S" {
                              try { [Console]::CursorVisible = $true } catch {}
-                             [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1)
+                             try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
                              Write-Host " SEARCH: " -NoNewline -ForegroundColor Cyan
                              $FilterText = Read-Host
                              $PageIndex = 0; $TaskRowIndex = 0
@@ -336,7 +341,7 @@ function Start-SystemMonitor {
                         "DownArrow"  { if ($RowIndex -lt ($ItemsOnPage - 1)) { $RowIndex++ } }
                         "S" {
                              try { [Console]::CursorVisible = $true } catch {}
-                             [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1)
+                             try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
                              Write-Host " SEARCH: " -NoNewline -ForegroundColor Cyan
                              $FilterText = Read-Host
                              $PageIndex = 0; $RowIndex = 0
@@ -377,7 +382,7 @@ function Start-SystemMonitor {
                         "DownArrow"  { if ($UserRowIndex -lt ($ItemsOnPage - 1)) { $UserRowIndex++ } }
                         "S" { 
                              try { [Console]::CursorVisible = $true } catch {}
-                             [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1)
+                             try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
                              Write-Host " SEARCH: " -NoNewline -ForegroundColor Cyan
                              $FilterText = Read-Host
                              $PageIndex = 0; $UserRowIndex = 0
@@ -419,7 +424,7 @@ function Start-SystemMonitor {
                         "DownArrow"  { if ($AppRowIndex -lt ($ItemsOnPage - 1)) { $AppRowIndex++ } }
                         "S" { 
                              try { [Console]::CursorVisible = $true } catch {}
-                             [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1)
+                             try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
                              Write-Host " SEARCH: " -NoNewline -ForegroundColor Cyan
                              $FilterText = Read-Host
                              $PageIndex = 0; $AppRowIndex = 0
@@ -844,7 +849,7 @@ function Start-SystemMonitor {
                     $Line1 = $FooterText.Substring(0, $SplitIdx).Trim()
                     $Line2 = $FooterText.Substring($SplitIdx).Trim()
                     Write-Host $Line1.PadRight($FrameWidth - 1) -ForegroundColor $FooterFg -BackgroundColor $FooterBg
-                    [Console]::SetCursorPosition(0, $FooterY + 2)
+                    try { [Console]::SetCursorPosition(0, $FooterY + 2) } catch {}
                     Write-Host $Line2.PadRight($FrameWidth - 1) -ForegroundColor $FooterFg -BackgroundColor $FooterBg -NoNewline
                 } else {
                     Write-Host $FooterText.Substring(0, $Cutoff) -ForegroundColor $FooterFg -BackgroundColor $FooterBg
