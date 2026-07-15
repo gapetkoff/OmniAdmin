@@ -67,6 +67,7 @@ function Start-SystemMonitor {
         UserModeActive    = $false
         ServiceModeActive = $false
         TaskModeActive    = $false
+        AppModeActive     = $false
         # Queues
         KillQueue         = [System.Collections.Concurrent.ConcurrentQueue[int]]::new()
         LogoffQueue       = [System.Collections.Concurrent.ConcurrentQueue[int]]::new()
@@ -77,6 +78,7 @@ function Start-SystemMonitor {
         UserData          = @()   
         ServiceData       = @()
         TaskData          = @()
+        AppData           = @()
         StaticData        = $null        
         RawProcessList    = $null
         LastUpdate        = [DateTime]::MinValue
@@ -106,6 +108,7 @@ function Start-SystemMonitor {
     $UserMode    = $false 
     $ServiceMode = $false 
     $TaskMode    = $false
+    $AppMode     = $false
     $ShowServiceProps = $false 
     $ShowTaskProps    = $false
     $ShowMainMenu     = $false
@@ -117,6 +120,7 @@ function Start-SystemMonitor {
     $UserRowIndex = 0     
     $SvcRowIndex  = 0     
     $TaskRowIndex = 0
+    $AppRowIndex  = 0
     $UILoaded    = $false
     $AnimFrames = @("●", "○", "◐", "◓", "◑", "◒")
     $AnimIndex = 0
@@ -142,6 +146,10 @@ function Start-SystemMonitor {
     $TskProps   = @("State", "TaskName", "LastRunTime", "LastTaskResult")
     $TskWidths  = @(10, 30, 25, 10)
     $TskAligns  = @("-", "-", "-", "-")
+
+    $AppHeaders = @("Name", "Version", "Publisher", "Type", "Install Date")
+    $AppProps   = @("DisplayName", "DisplayVersion", "Publisher", "AppType", "InstallDate")
+    $AppAligns  = @("-", "-", "-", "-", "-")
 
     # Initial Wait
     try {
@@ -169,6 +177,7 @@ function Start-SystemMonitor {
             $SyncHash.UserModeActive = $UserMode
             $SyncHash.ServiceModeActive = ($ServiceMode -and -not $ShowServiceProps)
             $SyncHash.TaskModeActive = ($TaskMode -and -not $ShowTaskProps)
+            $SyncHash.AppModeActive = $AppMode
 
             $CurrentWidth = $Host.UI.RawUI.WindowSize.Width
             $CurrentHeight = $Host.UI.RawUI.WindowSize.Height
@@ -202,12 +211,12 @@ function Start-SystemMonitor {
                 if ($Key -eq "M") { $ShowMainMenu = $true }
 
                 if ($Key -eq "Escape") { 
-                    $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $ShowMainMenu = $false; Clear-Host 
+                    $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $ShowMainMenu = $false; Clear-Host 
                 }
                 elseif ($Key -eq "P") {
                     if ($ServiceMode) { $ShowServiceProps = $true }
                     elseif ($TaskMode) { $ShowTaskProps = $true }
-                    elseif (-not $UserMode) {
+                    elseif (-not $UserMode -and -not $AppMode) {
                          Clear-Host
                          $Paused = -not $Paused
                          $RowIndex = 0; $PageIndex = 0
@@ -391,6 +400,38 @@ function Start-SystemMonitor {
                         }
                     }
                 }
+                # --- INPUT: APP MODE ---
+                elseif ($AppMode) {
+                    $AppList = $SyncHash.AppData
+                    if ($FilterText) { $AppList = $AppList | Where-Object { $_.DisplayName -like "*$FilterText*" -or $_.Publisher -like "*$FilterText*" } }
+                    $TotalCount = if ($AppList) { $AppList.Count } else { 0 }
+                    $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
+                    $MaxPages = [math]::Ceiling($TotalCount / $CurrentPageSize)
+                    if ($MaxPages -eq 0) { $MaxPages = 1 }
+                    $ItemsOnPage = $CurrentPageSize
+                    if (($PageIndex + 1) -eq $MaxPages) { $ItemsOnPage = $TotalCount - ($PageIndex * $CurrentPageSize) }
+
+                    switch ($Key) {
+                        "RightArrow" { if ($PageIndex -lt ($MaxPages - 1)) { $PageIndex++; $AppRowIndex = 0 } }
+                        "LeftArrow"  { if ($PageIndex -gt 0) { $PageIndex--; $AppRowIndex = 0 } }
+                        "UpArrow"    { if ($AppRowIndex -gt 0) { $AppRowIndex-- } }
+                        "DownArrow"  { if ($AppRowIndex -lt ($ItemsOnPage - 1)) { $AppRowIndex++ } }
+                        "S" { 
+                             try { [Console]::CursorVisible = $true } catch {}
+                             [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1)
+                             Write-Host " SEARCH: " -NoNewline -ForegroundColor Cyan
+                             $FilterText = Read-Host
+                             $PageIndex = 0; $AppRowIndex = 0
+                             try { [Console]::CursorVisible = $false } catch {}
+                             Clear-Host 
+                        }
+                        "D1" { if ($SelColIndex -eq 0) { $IsDesc = -not $IsDesc } else { $SelColIndex = 0; $IsDesc = $false } }
+                        "D2" { if ($SelColIndex -eq 1) { $IsDesc = -not $IsDesc } else { $SelColIndex = 1; $IsDesc = $false } }
+                        "D3" { if ($SelColIndex -eq 2) { $IsDesc = -not $IsDesc } else { $SelColIndex = 2; $IsDesc = $true } }
+                        "D4" { if ($SelColIndex -eq 3) { $IsDesc = -not $IsDesc } else { $SelColIndex = 3; $IsDesc = $true } }
+                        "D5" { if ($SelColIndex -eq 4) { $IsDesc = -not $IsDesc } else { $SelColIndex = 4; $IsDesc = $true } }
+                    }
+                }
                 # --- INPUT: LIVE ---
                 else {
                     switch ($Key) {
@@ -477,6 +518,26 @@ function Start-SystemMonitor {
                 $FooterText = " [S] Search  │  [T] Start  │  [P] Props  │  [1-4] Sort  │  [←/→] Page  │  [M] Menu  │  [ESC] Back "
                 $FooterBg   = "DarkCyan"; $FooterFg = "White"
             }
+            elseif ($AppMode) {
+                $FilteredApps = $SyncHash.AppData
+                if ($FilterText) { $FilteredApps = $FilteredApps | Where-Object { $_.DisplayName -like "*$FilterText*" -or $_.Publisher -like "*$FilterText*" } }
+                $TotalCount = if ($FilteredApps) { $FilteredApps.Count } else { 0 }
+                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
+                $MaxPages = [math]::Ceiling($TotalCount / $CurrentPageSize)
+                if ($MaxPages -eq 0) { $MaxPages = 1 }
+                
+                if ($PageIndex -ge $MaxPages) { $PageIndex = [math]::Max(0, $MaxPages - 1) }
+                $ItemsOnPage = $CurrentPageSize
+                if (($PageIndex + 1) -eq $MaxPages) { $ItemsOnPage = $TotalCount - ($PageIndex * $CurrentPageSize) }
+                if ($AppRowIndex -ge $ItemsOnPage) { $AppRowIndex = [math]::Max(0, $ItemsOnPage - 1) }
+                
+                $HeaderText = " 📦 INSTALLED APPLICATIONS - PAGE $($PageIndex+1)/$MaxPages "
+                if ($FilterText) { $HeaderText += "[Filter: $FilterText] " }
+                $HeaderBg   = "DarkGreen"; $HeaderFg = "White"
+                
+                $FooterText = " [S] Search  │  [1-5] Sort  │  [←/→] Page  │  [M] Menu  │  [ESC] Back "
+                $FooterBg   = "DarkGreen"; $FooterFg = "White"
+            }
             elseif ($Paused) {
                 $FilteredList = $FrozenList
                 if ($FilterText) { $FilteredList = $FrozenList | Where-Object { $_.Name -like "*$FilterText*" } }
@@ -523,6 +584,7 @@ function Start-SystemMonitor {
             if ($ServiceMode) { $HeaderColor = "Yellow" }
             if ($TaskMode) { $HeaderColor = "DarkCyan" }
             if ($UserMode) { $HeaderColor = "DarkMagenta" }
+            if ($AppMode) { $HeaderColor = "DarkGreen" }
             
             Write-Host ("═" * $FrameWidth) -ForegroundColor $HeaderColor
             Write-Host "$HeaderText".PadRight($FrameWidth) -ForegroundColor $HeaderFg -BackgroundColor $HeaderBg
@@ -533,7 +595,8 @@ function Start-SystemMonitor {
                 $SvcC = if ($SyncHash.ServiceData) { $SyncHash.ServiceData.Count } else { 0 }
                 $TskC = if ($SyncHash.TaskData) { $SyncHash.TaskData.Count } else { 0 }
                 $UsrC = if ($SyncHash.UserData) { $SyncHash.UserData.Count } else { 0 }
-                $UIDebug = "UI: Svc=$SvcC Tsk=$TskC Usr=$UsrC"
+                $AppC = if ($SyncHash.AppData) { $SyncHash.AppData.Count } else { 0 }
+                $UIDebug = "UI: Svc=$SvcC Tsk=$TskC Usr=$UsrC App=$AppC"
                 Write-Host "$($SyncHash.DebugLog) | $UIDebug".PadRight($FrameWidth) -ForegroundColor Yellow -BackgroundColor Black
             }
             #endregion
@@ -704,6 +767,70 @@ function Start-SystemMonitor {
                             } else {
                                 Write-Host $Line.Substring(0, $Line.Length-10).PadRight($FrameWidth-10) -ForegroundColor $Fg -NoNewline
                                 Write-Host ("{0,-10}" -f $Res) -ForegroundColor $ResColor
+                            }
+                        } else { Write-Host "".PadRight($FrameWidth) }
+                        $RowsDrawn++
+                    }
+                }
+                $Empty = $CurrentPageSize - $RowsDrawn
+                if ($Empty -gt 0) { for($x=0;$x -lt $Empty;$x++) { Write-Host "".PadRight($FrameWidth) } }
+                #endregion
+            }
+            elseif ($AppMode) {
+                #region MODE: APP GRID
+                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
+                $Avail = [math]::Max(20, $FrameWidth - 42)
+                $NameW = [math]::Floor($Avail * 0.6)
+                $PubW  = $Avail - $NameW
+                $AppWidths = @($NameW, 15, $PubW, 10, 12)
+
+                # --- APP GRID ---
+                Write-Host "  " -NoNewline
+                for ($i = 0; $i -lt $AppHeaders.Count; $i++) {
+                    $HText = $AppHeaders[$i]
+                    if ($i -eq $SelColIndex) {
+                        $Arrow = if ($IsDesc) { "▼" } else { "▲" }
+                        $HText = "$HText$Arrow"
+                    }
+                    if ($HText.Length -gt $AppWidths[$i]) { $HText = $HText.Substring(0, $AppWidths[$i]) }
+                    
+                    $Fmt = "{0," + $AppAligns[$i] + $AppWidths[$i] + "}"
+                    if ($i -eq $SelColIndex) {
+                        Write-Host ($Fmt -f $HText) -ForegroundColor Black -BackgroundColor White -NoNewline
+                    } else {
+                        Write-Host ($Fmt -f $HText) -ForegroundColor Gray -NoNewline
+                    }
+                    Write-Host " " -NoNewline
+                }
+                Write-Host "".PadRight(10); Write-Host ""; Write-Host ("─" * $FrameWidth) -ForegroundColor DarkGray
+
+                # Get apps and sort
+                $Apps = $SyncHash.AppData
+                if ($FilterText) { $Apps = $Apps | Where-Object { $_.DisplayName -like "*$FilterText*" -or $_.Publisher -like "*$FilterText*" } }
+                $SortedApps = $Apps | Sort-Object $AppProps[$SelColIndex] -Descending:$IsDesc
+                
+                $Start = $PageIndex * $CurrentPageSize
+                $ListToShow = $SortedApps | Select-Object -Skip $Start -First $CurrentPageSize
+                
+                $RowsDrawn = 0
+                if ($ListToShow) {
+                    $CurrentListArray = @($ListToShow)
+                    for ($i = 0; $i -lt $CurrentPageSize; $i++) {
+                        if ($i -lt $CurrentListArray.Count) {
+                            $app = $CurrentListArray[$i]
+                            
+                            $Name = if ($app.DisplayName.Length -gt $NameW) { $app.DisplayName.Substring(0, $NameW) } else { $app.DisplayName }
+                            $Ver  = if ($app.DisplayVersion.Length -gt 15) { $app.DisplayVersion.Substring(0, 15) } else { $app.DisplayVersion }
+                            $Pub  = if ($app.Publisher.Length -gt $PubW) { $app.Publisher.Substring(0, $PubW) } else { $app.Publisher }
+                            $Type = if ($app.AppType.Length -gt 10) { $app.AppType.Substring(0, 10) } else { $app.AppType }
+                            $Date = if ($app.InstallDate.Length -gt 12) { $app.InstallDate.Substring(0, 12) } else { $app.InstallDate }
+                            
+                            $Line = "  {0,-$NameW} {1,-15} {2,-$PubW} {3,-10} {4,-12}" -f $Name, $Ver, $Pub, $Type, $Date
+                            
+                            if ($i -eq $AppRowIndex) {
+                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor Black -BackgroundColor White
+                            } else {
+                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor White
                             }
                         } else { Write-Host "".PadRight($FrameWidth) }
                         $RowsDrawn++
@@ -921,9 +1048,9 @@ function Start-SystemMonitor {
             }
             # --- MAIN MENU ---
             if ($ShowMainMenu) {
-                $MenuOpts = @("Live Monitor", "Services", "Scheduled Tasks", "User Sessions", "Quit")
+                $MenuOpts = @("Live Monitor", "Services", "Scheduled Tasks", "Installed Apps", "User Sessions", "Quit")
                 $MenuIndex = 0
-                $BoxWidth = 40; $BoxHeight = 8
+                $BoxWidth = 40; $BoxHeight = 9
                 $StartX = [math]::Floor(($CurrentWidth - $BoxWidth) / 2)
                 $StartY = [math]::Floor(($CurrentHeight - $BoxHeight) / 2)
                 
@@ -939,7 +1066,7 @@ function Start-SystemMonitor {
                         for ($i = 0; $i -lt $MenuOpts.Count; $i++) {
                             [Console]::SetCursorPosition($StartX + 4, $StartY + 3 + $i)
                             $Prefix = "[$($i+1)]"
-                            if ($i -eq 4) { $Prefix = "[Q]" }
+                            if ($i -eq 5) { $Prefix = "[Q]" }
                             
                             if ($i -eq $MenuIndex) { Write-Host " > $Prefix $($MenuOpts[$i]) " -ForegroundColor Black -BackgroundColor White -NoNewline } 
                             else { Write-Host "   $Prefix $($MenuOpts[$i]) " -ForegroundColor White -BackgroundColor DarkBlue -NoNewline }
@@ -948,24 +1075,26 @@ function Start-SystemMonitor {
                     if ([Console]::KeyAvailable) {
                         $k = [Console]::ReadKey($true).Key
                         if ($k -eq 'UpArrow' -and $MenuIndex -gt 0) { $MenuIndex--; $MenuDirty = $true }
-                        if ($k -eq 'DownArrow' -and $MenuIndex -lt 4) { $MenuIndex++; $MenuDirty = $true }
+                        if ($k -eq 'DownArrow' -and $MenuIndex -lt 5) { $MenuIndex++; $MenuDirty = $true }
                         if ($k -eq 'Escape') { $ShowMainMenu = $false; $NeedsRedraw = $true; Clear-Host }
                         if ($k -eq 'Enter') {
                             $ShowMainMenu = $false
                             switch ($MenuIndex) {
-                                0 { $UserMode = $false; $ServiceMode = $false; $TaskMode = $false } # Live
-                                1 { $ServiceMode = $true; $UserMode = $false; $TaskMode = $false }
-                                2 { $TaskMode = $true; $ServiceMode = $false; $UserMode = $false }
-                                3 { $UserMode = $true; $ServiceMode = $false; $TaskMode = $false }
-                                4 { return }
+                                0 { $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false } # Live
+                                1 { $ServiceMode = $true; $UserMode = $false; $TaskMode = $false; $AppMode = $false }
+                                2 { $TaskMode = $true; $ServiceMode = $false; $UserMode = $false; $AppMode = $false }
+                                3 { $AppMode = $true; $TaskMode = $false; $ServiceMode = $false; $UserMode = $false }
+                                4 { $UserMode = $true; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false }
+                                5 { return }
                             }
-                            $SvcRowIndex = 0; $TaskRowIndex = 0; $UserRowIndex = 0; $PageIndex = 0; $NeedsRedraw = $true; Clear-Host
+                            $SvcRowIndex = 0; $TaskRowIndex = 0; $UserRowIndex = 0; $AppRowIndex = 0; $PageIndex = 0; $NeedsRedraw = $true; Clear-Host
                         }
-                        # Hotkeys 1-4 and Q
-                        if ($k -eq 'D1') { $ShowMainMenu = $false; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D2') { $ShowMainMenu = $false; $ServiceMode=$true; $UserMode=$false; $TaskMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D3') { $ShowMainMenu = $false; $TaskMode=$true; $ServiceMode=$false; $UserMode=$false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D4') { $ShowMainMenu = $false; $UserMode=$true; $ServiceMode=$false; $TaskMode=$false; $NeedsRedraw = $true; Clear-Host }
+                        # Hotkeys 1-5 and Q
+                        if ($k -eq 'D1') { $ShowMainMenu = $false; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D2') { $ShowMainMenu = $false; $ServiceMode=$true; $UserMode=$false; $TaskMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D3') { $ShowMainMenu = $false; $TaskMode=$true; $ServiceMode=$false; $UserMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D4') { $ShowMainMenu = $false; $AppMode=$true; $TaskMode=$false; $ServiceMode=$false; $UserMode=$false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D5') { $ShowMainMenu = $false; $UserMode=$true; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $NeedsRedraw = $true; Clear-Host }
                         if ($k -eq 'Q')  { return }
                     }
                     Start-Sleep -Milliseconds 50

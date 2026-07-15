@@ -3,6 +3,7 @@ function Invoke-SystemMonitorWorker {
     
     $Session = $null
     $LastUserFetch = [DateTime]::MinValue
+    $LastAppFetch = [DateTime]::MinValue
     $IsLocal = ($Sync.TargetComputer -eq "localhost" -or $Sync.TargetComputer -eq $env:COMPUTERNAME)
     
     #region CONNECTION SETUP
@@ -124,15 +125,21 @@ function Invoke-SystemMonitorWorker {
                 $LastUserFetch = Get-Date
             }
             
+            $FetchApps = $false
+            if ($Sync.AppModeActive -or ((Get-Date) - $LastAppFetch).TotalSeconds -gt 60) {
+                $FetchApps = $true
+                $LastAppFetch = Get-Date
+            }
+            
             # GPU: only query every 5 cycles (~5s) since it's the slowest WMI class
             $GpuCycleCount++
             $DoGpu = ($GpuCycleCount -ge 5)
             if ($DoGpu) { $GpuCycleCount = 0 }
             
-            $ArgsArray = @([bool]$FetchUsers, [bool]$Sync.ServiceModeActive, [bool]$Sync.TaskModeActive, [bool]$DoGpu)
+            $ArgsArray = @([bool]$FetchUsers, [bool]$Sync.ServiceModeActive, [bool]$Sync.TaskModeActive, [bool]$DoGpu, [bool]$FetchApps)
 
             $Result = Run-Script -Script {
-                param($DoUsers, $DoServices, $DoTasks, $DoGpu)
+                param($DoUsers, $DoServices, $DoTasks, $DoGpu, $DoApps)
                 
                 $DebugStr = ""
 
@@ -233,6 +240,63 @@ function Invoke-SystemMonitorWorker {
                     } catch { $DebugStr += "Tsk:Err " }
                 }
 
+                # 5. Installed Apps Data
+                $AppList = $null
+                if ($DoApps) {
+                    try {
+                        $LocalApps = @()
+                        
+                        # A. Registry entries (Classic)
+                        $RegPaths = @(
+                            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                            "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+                        )
+                        $RegApps = Get-ItemProperty $RegPaths -ErrorAction SilentlyContinue |
+                            Where-Object { $_.DisplayName -and -not $_.SystemComponent -and $_.ParentKeyName -eq $null } |
+                            ForEach-Object {
+                                $Date = $_.InstallDate
+                                if ($Date -match '^\d{8}$') {
+                                    $Date = "$($Date.Substring(0,4))-$($Date.Substring(4,2))-$($Date.Substring(6,2))"
+                                }
+                                [PSCustomObject]@{
+                                    DisplayName    = [string]$_.DisplayName
+                                    DisplayVersion = if ($_.DisplayVersion) { [string]$_.DisplayVersion } else { "" }
+                                    Publisher      = if ($_.Publisher) { [string]$_.Publisher } else { "" }
+                                    AppType        = "Classic"
+                                    InstallDate    = if ($Date) { [string]$Date } else { "" }
+                                }
+                            }
+                        if ($RegApps) { $LocalApps += $RegApps }
+                        
+                        # B. AppX Packages (Store)
+                        $StoreApps = Get-AppxPackage -ErrorAction SilentlyContinue |
+                            Where-Object { -not $_.IsFramework -and $_.SignatureKind -in 'Store', 'Developer', 'None' } |
+                            ForEach-Object {
+                                $Name = $_.Name
+                                $Name = $Name -replace '\.', ' '
+                                $Name = $Name -creplace '(?<=[a-z])(?=[A-Z])', ' '
+                                $Name = $Name -replace '\bMicrosoft Microsoft\b', 'Microsoft'
+                                
+                                $Pub = $_.Publisher
+                                if ($Pub -match 'CN=([^,]+)') { $Pub = $Matches[1] }
+                                
+                                [PSCustomObject]@{
+                                    DisplayName    = [string]$Name
+                                    DisplayVersion = if ($_.Version) { [string]$_.Version } else { "" }
+                                    Publisher      = if ($Pub) { [string]$Pub } else { "" }
+                                    AppType        = "Store"
+                                    InstallDate    = ""
+                                }
+                            }
+                        if ($StoreApps) { $LocalApps += $StoreApps }
+                        
+                        # Deduplicate by DisplayName and sort
+                        $AppList = $LocalApps | Group-Object DisplayName | ForEach-Object { $_.Group[0] }
+                        $DebugStr += "App: $($AppList.Count) "
+                    } catch { $DebugStr += "App:Err " }
+                }
+
                 # V71: Safety clamps on total system stats to avoid overflow anomalies
                 $SafeCpuLoad = if ($CpuTotal) { [math]::Min(100, [math]::Max(0, [math]::Round([double]$CpuTotal.PercentProcessorTime))) } else { 0 }
                 $SafeDiskR   = if ($DiskIO) { [math]::Round([double]$DiskIO.DiskReadBytesPersec / 1MB, 1) } else { 0 }
@@ -253,6 +317,7 @@ function Invoke-SystemMonitorWorker {
                     UserList  = $UserList
                     SvcList   = $SvcList
                     TaskList  = $TaskList
+                    AppList   = $AppList
                     DebugStr  = $DebugStr
                     ThreadCount = $ThreadCnt
                 }
@@ -269,6 +334,7 @@ function Invoke-SystemMonitorWorker {
             if ($Result.UserList) { $Sync.UserData = @($Result.UserList) }
             if ($Result.SvcList) { $Sync.ServiceData = @($Result.SvcList) }
             if ($Result.TaskList) { $Sync.TaskData = @($Result.TaskList) }
+            if ($Result.AppList) { $Sync.AppData = @($Result.AppList) }
             
             if ($Result.DebugStr) { $Sync.DebugLog = $Result.DebugStr }
             
