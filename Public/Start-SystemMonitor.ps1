@@ -36,7 +36,55 @@ function Start-SystemMonitor {
         [Parameter(HelpMessage="Enable diagnostic output bar")]
         [switch]$Diagnostics
     )
-    
+    # region Unicode Helper Functions for Console Alignment
+    function Get-DisplayWidth {
+        param([string]$s)
+        if (-not $s) { return 0 }
+        $width = 0
+        foreach ($char in $s.ToCharArray()) {
+            $val = [int]$char
+            if (($val -ge 0x4e00 -and $val -le 0x9fff) -or
+                ($val -ge 0x3000 -and $val -le 0x30ff) -or
+                ($val -ge 0xac00 -and $val -le 0xd7af) -or
+                ($val -ge 0xff01 -and $val -le 0xff60)) {
+                $width += 2
+            } else {
+                $width += 1
+            }
+        }
+        return $width
+    }
+
+    function Pad-String {
+        param([string]$s, [int]$width, [string]$paddingChar = " ")
+        $currentWidth = Get-DisplayWidth $s
+        if ($currentWidth -ge $width) {
+            $result = ""
+            $w = 0
+            foreach ($char in $s.ToCharArray()) {
+                $val = [int]$char
+                $charW = 1
+                if (($val -ge 0x4e00 -and $val -le 0x9fff) -or
+                    ($val -ge 0x3000 -and $val -le 0x30ff) -or
+                    ($val -ge 0xac00 -and $val -le 0xd7af) -or
+                    ($val -ge 0xff01 -and $val -le 0xff60)) {
+                    $charW = 2
+                }
+                if ($w + $charW -le $width) {
+                    $result += $char
+                    $w += $charW
+                } else {
+                    break
+                }
+            }
+            $result += ($paddingChar * ($width - $w))
+            return $result
+        } else {
+            return $s + ($paddingChar * ($width - $currentWidth))
+        }
+    }
+    # endregion
+
     $isWindowsOS = $true
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
         $isWindowsOS = $false
@@ -819,18 +867,19 @@ function Start-SystemMonitor {
                         if ($i -lt $CurrentListArray.Count) {
                             $app = $CurrentListArray[$i]
                             
-                            $Name = if ($app.DisplayName.Length -gt $NameW) { $app.DisplayName.Substring(0, $NameW) } else { $app.DisplayName }
-                            $Ver  = if ($app.DisplayVersion.Length -gt 15) { $app.DisplayVersion.Substring(0, 15) } else { $app.DisplayVersion }
-                            $Pub  = if ($app.Publisher.Length -gt $PubW) { $app.Publisher.Substring(0, $PubW) } else { $app.Publisher }
-                            $Type = if ($app.AppType.Length -gt 10) { $app.AppType.Substring(0, 10) } else { $app.AppType }
-                            $Date = if ($app.InstallDate.Length -gt 12) { $app.InstallDate.Substring(0, 12) } else { $app.InstallDate }
+                            $Name = Pad-String $app.DisplayName $NameW
+                            $Ver  = Pad-String $app.DisplayVersion 15
+                            $Pub  = Pad-String $app.Publisher $PubW
+                            $Type = Pad-String $app.AppType 10
+                            $Date = Pad-String $app.InstallDate 12
                             
-                            $Line = "  {0,-$NameW} {1,-15} {2,-$PubW} {3,-10} {4,-12}" -f $Name, $Ver, $Pub, $Type, $Date
+                            $Line = "  $Name $Ver $Pub $Type $Date"
+                            $PaddedLine = Pad-String $Line $FrameWidth
                             
                             if ($i -eq $AppRowIndex) {
-                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor Black -BackgroundColor White
+                                Write-Host $PaddedLine -ForegroundColor Black -BackgroundColor White
                             } else {
-                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor White
+                                Write-Host $PaddedLine -ForegroundColor White
                             }
                         } else { Write-Host "".PadRight($FrameWidth) }
                         $RowsDrawn++

@@ -301,8 +301,8 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
                             Where-Object { -not $_.IsFramework -and $_.SignatureKind -in 'Store', 'Developer', 'None' } |
                             ForEach-Object {
                                 $Name = $_.Name
-                                # Strip hex-like publisher hash prefixes (e.g. AD2F1837.HPPrinterControl -> HPPrinterControl)
-                                $Name = $Name -replace '^[a-fA-F0-9]{8}[. -]', ''
+                                # Strip hex-like publisher hash or numeric domain prefixes (e.g. AD2F1837.HPPrinterControl -> HPPrinterControl, 19453.net.Rufus -> Rufus)
+                                $Name = $Name -replace '^[a-fA-F0-9]{8}[. -]', '' -replace '^\d+\.net\.', ''
                                 $Name = $Name -replace '\.', ' '
                                 $Name = $Name -creplace '(?<=[a-z])(?=[A-Z])', ' '
                                 $Name = $Name -replace '\bMicrosoft Microsoft\b', 'Microsoft'
