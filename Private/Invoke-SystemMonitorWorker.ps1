@@ -244,6 +244,31 @@ function Invoke-SystemMonitorWorker {
                 $AppList = $null
                 if ($DoApps) {
                     try {
+                        # Load and register Shlwapi type if not already loaded (for indirect string resolution)
+                        if (-not ("Win32.Shlwapi" -as [type])) {
+                            try {
+                                $MethodDefinition = @'
+[DllImport("shlwapi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+public static extern int SHLoadIndirectString(string pszSource, System.Text.StringBuilder pszOutBuf, int cchOutBuf, System.IntPtr ppvReserved);
+'@
+                                Add-Type -MemberDefinition $MethodDefinition -Name "Shlwapi" -Namespace "Win32" -ErrorAction SilentlyContinue
+                            } catch {}
+                        }
+
+                        $GetFriendlyName = {
+                            param([string]$RawString)
+                            if ($RawString -and $RawString.StartsWith("@") -and ("Win32.Shlwapi" -as [type])) {
+                                try {
+                                    $OutBuf = [System.Text.StringBuilder]::new(1024)
+                                    $Result = [Win32.Shlwapi]::SHLoadIndirectString($RawString, $OutBuf, $OutBuf.Capacity, [IntPtr]::Zero)
+                                    if ($Result -eq 0) {
+                                        return $OutBuf.ToString()
+                                    }
+                                } catch {}
+                            }
+                            return $RawString
+                        }
+
                         $LocalApps = @()
                         
                         # A. Registry entries (Classic)
@@ -259,10 +284,12 @@ function Invoke-SystemMonitorWorker {
                                 if ($Date -match '^\d{8}$') {
                                     $Date = "$($Date.Substring(0,4))-$($Date.Substring(4,2))-$($Date.Substring(6,2))"
                                 }
+                                $DispName = & $GetFriendlyName $_.DisplayName
+                                $PubName = & $GetFriendlyName $_.Publisher
                                 [PSCustomObject]@{
-                                    DisplayName    = [string]$_.DisplayName
+                                    DisplayName    = [string]$DispName
                                     DisplayVersion = if ($_.DisplayVersion) { [string]$_.DisplayVersion } else { "" }
-                                    Publisher      = if ($_.Publisher) { [string]$_.Publisher } else { "" }
+                                    Publisher      = [string]$PubName
                                     AppType        = "Classic"
                                     InstallDate    = if ($Date) { [string]$Date } else { "" }
                                 }
@@ -274,12 +301,15 @@ function Invoke-SystemMonitorWorker {
                             Where-Object { -not $_.IsFramework -and $_.SignatureKind -in 'Store', 'Developer', 'None' } |
                             ForEach-Object {
                                 $Name = $_.Name
+                                # Strip hex-like publisher hash prefixes (e.g. AD2F1837.HPPrinterControl -> HPPrinterControl)
+                                $Name = $Name -replace '^[a-fA-F0-9]{8}[. -]', ''
                                 $Name = $Name -replace '\.', ' '
                                 $Name = $Name -creplace '(?<=[a-z])(?=[A-Z])', ' '
                                 $Name = $Name -replace '\bMicrosoft Microsoft\b', 'Microsoft'
                                 
                                 $Pub = $_.Publisher
                                 if ($Pub -match 'CN=([^,]+)') { $Pub = $Matches[1] }
+                                $Pub = & $GetFriendlyName $Pub
                                 
                                 [PSCustomObject]@{
                                     DisplayName    = [string]$Name
