@@ -36,54 +36,7 @@ function Start-SystemMonitor {
         [Parameter(HelpMessage="Enable diagnostic output bar")]
         [switch]$Diagnostics
     )
-    # region Unicode Helper Functions for Console Alignment
-    function Get-DisplayWidth {
-        param([string]$s)
-        if (-not $s) { return 0 }
-        $width = 0
-        foreach ($char in $s.ToCharArray()) {
-            $val = [int]$char
-            if (($val -ge 0x4e00 -and $val -le 0x9fff) -or
-                ($val -ge 0x3000 -and $val -le 0x30ff) -or
-                ($val -ge 0xac00 -and $val -le 0xd7af) -or
-                ($val -ge 0xff01 -and $val -le 0xff60)) {
-                $width += 2
-            } else {
-                $width += 1
-            }
-        }
-        return $width
-    }
 
-    function Pad-String {
-        param([string]$s, [int]$width, [string]$paddingChar = " ")
-        $currentWidth = Get-DisplayWidth $s
-        if ($currentWidth -ge $width) {
-            $result = ""
-            $w = 0
-            foreach ($char in $s.ToCharArray()) {
-                $val = [int]$char
-                $charW = 1
-                if (($val -ge 0x4e00 -and $val -le 0x9fff) -or
-                    ($val -ge 0x3000 -and $val -le 0x30ff) -or
-                    ($val -ge 0xac00 -and $val -le 0xd7af) -or
-                    ($val -ge 0xff01 -and $val -le 0xff60)) {
-                    $charW = 2
-                }
-                if ($w + $charW -le $width) {
-                    $result += $char
-                    $w += $charW
-                } else {
-                    break
-                }
-            }
-            $result += ($paddingChar * ($width - $w))
-            return $result
-        } else {
-            return $s + ($paddingChar * ($width - $currentWidth))
-        }
-    }
-    # endregion
 
     $isWindowsOS = $true
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
@@ -709,306 +662,30 @@ function Start-SystemMonitor {
             #endregion
 
             #region RENDER: CONTENT GRIDS
+            $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
             if ($ServiceMode) {
-                #region MODE: SERVICE GRID
-                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
-                $Avail = [math]::Max(10, $FrameWidth - 26)
-                $NameW = [math]::Floor($Avail / 2)
-                $DispW = $Avail - $NameW
-                $SvcWidths = @(10, $NameW, $DispW, 10)
-
-                # --- SERVICE GRID ---
-                Write-Host "  " -NoNewline
-                for ($i = 0; $i -lt $SvcHeaders.Count; $i++) {
-                    $HText = $SvcHeaders[$i]
-                    if ($i -eq $SelColIndex) {
-                        $Arrow = if ($IsDesc) { "▼" } else { "▲" }
-                        $HText = "$HText$Arrow"
-                    }
-                    if ($HText.Length -gt $SvcWidths[$i]) { $HText = $HText.Substring(0, $SvcWidths[$i]) }
-                    
-                    $Fmt = "{0," + $SvcAligns[$i] + $SvcWidths[$i] + "}"
-                    if ($i -eq $SelColIndex) {
-                        Write-Host ($Fmt -f $HText) -ForegroundColor Black -BackgroundColor White -NoNewline
-                    } else {
-                        Write-Host ($Fmt -f $HText) -ForegroundColor Gray -NoNewline
-                    }
-                    Write-Host " " -NoNewline
-                }
-                Write-Host "".PadRight(10); Write-Host ""; Write-Host ("─" * $FrameWidth) -ForegroundColor DarkGray
-
-                $SortedSvcs = $FilteredSvc | Sort-Object $SvcProps[$SelColIndex] -Descending:$IsDesc
-                $Start = $PageIndex * $CurrentPageSize
-                $ListToShow = $SortedSvcs | Select-Object -Skip $Start -First $CurrentPageSize
-                
-                $RowsDrawn = 0
-                if ($ListToShow) {
-                    $CurrentListArray = @($ListToShow)
-                    for ($i = 0; $i -lt $CurrentPageSize; $i++) {
-                        if ($i -lt $CurrentListArray.Count) {
-                            $s = $CurrentListArray[$i]
-                            
-                            $Name = if ($s.Name.Length -gt $NameW) { $s.Name.Substring(0, $NameW) } else { $s.Name }
-                            $DName = if ($s.DisplayName.Length -gt $DispW) { $s.DisplayName.Substring(0, $DispW) } else { $s.DisplayName }
-                            
-                            $Line = "  {0,-10} {1,-$NameW} {2,-$DispW} {3,-10}" -f $s.Status, $Name, $DName, $s.StartType
-                            $Fg = if ($s.Status -eq 'Running') { "Green" } elseif ($s.Status -eq 'Stopped') { "Red" } else { "Yellow" }
-                            
-                            if ($i -eq $SvcRowIndex -and -not $ShowServiceProps) {
-                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor Black -BackgroundColor White
-                            } else {
-                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor $Fg
-                            }
-                        } else { Write-Host "".PadRight($FrameWidth) }
-                        $RowsDrawn++
-                    }
-                }
-                $Empty = $CurrentPageSize - $RowsDrawn
-                if ($Empty -gt 0) { for($x=0;$x -lt $Empty;$x++) { Write-Host "".PadRight($FrameWidth) } }
-                #endregion
+                Out-ServiceGrid -Services $SyncHash.ServiceData -SelectedRow $SvcRowIndex -PageIndex $PageIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -SelColIndex $SelColIndex -IsDesc $IsDesc
             }
             elseif ($TaskMode) {
-                #region MODE: TASK GRID
-                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
-                $Avail = $FrameWidth - 26
-                $NameW = [math]::Floor($Avail * 0.55)
-                $TimeW = $Avail - $NameW
-                $TskWidths = @(10, $NameW, $TimeW, 10)
-
-                Write-Host "  " -NoNewline
-                for ($i = 0; $i -lt $TskHeaders.Count; $i++) {
-                    $HText = $TskHeaders[$i]
-                    if ($i -eq $SelColIndex) { $Arrow = if ($IsDesc) { "▼" } else { "▲" }; $HText = "$HText$Arrow" }
-                    if ($HText.Length -gt $TskWidths[$i]) { $HText = $HText.Substring(0, $TskWidths[$i]) }
-                    $Fmt = "{0," + $TskAligns[$i] + $TskWidths[$i] + "}"
-                    if ($i -eq $SelColIndex) { Write-Host ($Fmt -f $HText) -ForegroundColor Black -BackgroundColor White -NoNewline } 
-                    else { Write-Host ($Fmt -f $HText) -ForegroundColor Gray -NoNewline }
-                    Write-Host " " -NoNewline
-                }
-                Write-Host "".PadRight(10); Write-Host ""; Write-Host ("─" * $FrameWidth) -ForegroundColor DarkGray
-
-                # CRITICAL FIX V62: Bind Local Variable to Shared Hash
-                $Tasks = $SyncHash.TaskData
-                if ($FilterText) { $Tasks = $Tasks | Where-Object { $_.TaskName -like "*$FilterText*" } }
-                $SortedTasks = $Tasks | Sort-Object $TskProps[$SelColIndex] -Descending:$IsDesc
-                
-                $Start = $PageIndex * $CurrentPageSize
-                $ListToShow = $SortedTasks | Select-Object -Skip $Start -First $CurrentPageSize
-                
-                $RowsDrawn = 0
-                if ($ListToShow) {
-                    $CurrentListArray = @($ListToShow)
-                    for ($i = 0; $i -lt $CurrentPageSize; $i++) {
-                        if ($i -lt $CurrentListArray.Count) {
-                            $t = $CurrentListArray[$i]
-                            $Name = if ($t.TaskName.Length -gt $NameW) { $t.TaskName.Substring(0, $NameW) } else { $t.TaskName }
-                            $Last = if ($t.LastRunTime) { $t.LastRunTime.ToString("MM/dd HH:mm") } else { "Never" }
-                            $Res  = $t.LastTaskResult
-                            
-                            $Line = "  {0,-10} {1,-$NameW} {2,-$TimeW} {3,-10}" -f $t.State, $Name, $Last, $Res
-                            $Fg = if ($t.State -eq 'Running') { "Green" } elseif ($t.State -eq 'Ready') { "White" } else { "Gray" }
-                            $ResColor = if ($Res -eq 0) { "Green" } else { "Red" }
-                            
-                            if ($i -eq $TaskRowIndex -and -not $ShowTaskProps) {
-                                Write-Host $Line.Substring(0, $Line.Length-10).PadRight($FrameWidth-10) -ForegroundColor Black -BackgroundColor White -NoNewline
-                                Write-Host ("{0,-10}" -f $Res) -ForegroundColor Black -BackgroundColor White
-                            } else {
-                                Write-Host $Line.Substring(0, $Line.Length-10).PadRight($FrameWidth-10) -ForegroundColor $Fg -NoNewline
-                                Write-Host ("{0,-10}" -f $Res) -ForegroundColor $ResColor
-                            }
-                        } else { Write-Host "".PadRight($FrameWidth) }
-                        $RowsDrawn++
-                    }
-                }
-                $Empty = $CurrentPageSize - $RowsDrawn
-                if ($Empty -gt 0) { for($x=0;$x -lt $Empty;$x++) { Write-Host "".PadRight($FrameWidth) } }
-                #endregion
+                Out-TaskGrid -Tasks $SyncHash.TaskData -SelectedRow $TaskRowIndex -PageIndex $PageIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -SelColIndex $SelColIndex -IsDesc $IsDesc -ShowTaskProps $ShowTaskProps
             }
             elseif ($AppMode) {
-                #region MODE: APP GRID
-                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
-                $Avail = [math]::Max(20, $FrameWidth - 42)
-                $NameW = [math]::Floor($Avail * 0.6)
-                $PubW  = $Avail - $NameW
-                $AppWidths = @($NameW, 15, $PubW, 10, 12)
-
-                # --- APP GRID ---
-                Write-Host "  " -NoNewline
-                for ($i = 0; $i -lt $AppHeaders.Count; $i++) {
-                    $HText = $AppHeaders[$i]
-                    if ($i -eq $SelColIndex) {
-                        $Arrow = if ($IsDesc) { "▼" } else { "▲" }
-                        $HText = "$HText$Arrow"
-                    }
-                    if ($HText.Length -gt $AppWidths[$i]) { $HText = $HText.Substring(0, $AppWidths[$i]) }
-                    
-                    $Fmt = "{0," + $AppAligns[$i] + $AppWidths[$i] + "}"
-                    if ($i -eq $SelColIndex) {
-                        Write-Host ($Fmt -f $HText) -ForegroundColor Black -BackgroundColor White -NoNewline
-                    } else {
-                        Write-Host ($Fmt -f $HText) -ForegroundColor Gray -NoNewline
-                    }
-                    Write-Host " " -NoNewline
-                }
-                Write-Host "".PadRight(10); Write-Host ""; Write-Host ("─" * $FrameWidth) -ForegroundColor DarkGray
-
-                # Get apps and sort
-                $Apps = $SyncHash.AppData
-                if ($FilterText) { $Apps = $Apps | Where-Object { $_.DisplayName -like "*$FilterText*" -or $_.Publisher -like "*$FilterText*" } }
-                $SortedApps = $Apps | Sort-Object $AppProps[$SelColIndex] -Descending:$IsDesc
-                
-                $Start = $PageIndex * $CurrentPageSize
-                $ListToShow = $SortedApps | Select-Object -Skip $Start -First $CurrentPageSize
-                
-                $RowsDrawn = 0
-                if ($ListToShow) {
-                    $CurrentListArray = @($ListToShow)
-                    for ($i = 0; $i -lt $CurrentPageSize; $i++) {
-                        if ($i -lt $CurrentListArray.Count) {
-                            $app = $CurrentListArray[$i]
-                            
-                            $Name = Pad-String $app.DisplayName $NameW
-                            $Ver  = Pad-String $app.DisplayVersion 15
-                            $Pub  = Pad-String $app.Publisher $PubW
-                            $Type = Pad-String $app.AppType 10
-                            $Date = Pad-String $app.InstallDate 12
-                            
-                            $Line = "  $Name $Ver $Pub $Type $Date"
-                            $PaddedLine = Pad-String $Line $FrameWidth
-                            
-                            if ($i -eq $AppRowIndex) {
-                                Write-Host $PaddedLine -ForegroundColor Black -BackgroundColor White
-                            } else {
-                                Write-Host $PaddedLine -ForegroundColor White
-                            }
-                        } else { Write-Host "".PadRight($FrameWidth) }
-                        $RowsDrawn++
-                    }
-                }
-                $Empty = $CurrentPageSize - $RowsDrawn
-                if ($Empty -gt 0) { for($x=0;$x -lt $Empty;$x++) { Write-Host "".PadRight($FrameWidth) } }
-                #endregion
+                Out-AppGrid -Apps $SyncHash.AppData -SelectedRow $AppRowIndex -PageIndex $PageIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -SelColIndex $SelColIndex -IsDesc $IsDesc
             }
             elseif ($UserMode) {
-                #region MODE: USER GRID
-                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
-                $UHeaders = @("USER", "SESSION", "ID", "STATE", "IDLE", "LOGON TIME")
-                $UProps   = @("UserName", "SessionName", "SessionId", "State", "IdleTime", "LogonTime")
-                $UWidths  = @(20, 15, 10, 12, 15, 20)
-                $UAligns  = @("-", "-", "-", "-", "-", "-")
-
-                Write-Host "  " -NoNewline
-                for ($i = 0; $i -lt $UHeaders.Count; $i++) {
-                    $HText = $UHeaders[$i]
-                    if ($i -eq $SelColIndex) { $Arrow = if ($IsDesc) { "▼" } else { "▲" }; $HText = "$HText$Arrow" }
-                    if ($HText.Length -gt $UWidths[$i]) { $HText = $HText.Substring(0, $UWidths[$i]) }
-                    $Fmt = "{0," + $UAligns[$i] + $UWidths[$i] + "}"
-                    if ($i -eq $SelColIndex) { Write-Host ($Fmt -f $HText) -ForegroundColor Black -BackgroundColor White -NoNewline } 
-                    else { Write-Host ($Fmt -f $HText) -ForegroundColor Yellow -NoNewline }
-                    Write-Host " " -NoNewline
-                }
-                Write-Host "".PadRight(10); Write-Host ""; Write-Host ("─" * $FrameWidth) -ForegroundColor DarkGray
-
-                # CRITICAL FIX V62: Bind Local Variable to Shared Hash
-                $Users = $SyncHash.UserData
-                if ($FilterText) { $Users = $Users | Where-Object { $_.UserName -like "*$FilterText*" -or $_.SessionName -like "*$FilterText*" } }
-                
-                $SortedUsers = $Users
-                try { $SortedUsers = $Users | Sort-Object $UProps[$SelColIndex] -Descending:$IsDesc } catch {}
-                
-                $Start = $PageIndex * $CurrentPageSize
-                $ListToShow = $SortedUsers | Select-Object -Skip $Start -First $CurrentPageSize
-
-                $UserRowsDrawn = 0
-                if ($ListToShow) {
-                    $CurrentListArray = @($ListToShow)
-                    for ($i = 0; $i -lt $CurrentPageSize; $i++) {
-                        if ($i -lt $CurrentListArray.Count) {
-                            $u = $CurrentListArray[$i]
-                            $Line = "  {0,-20} {1,-15} {2,-10} {3,-12} {4,-15} {5,-20}" -f $u.UserName, $u.SessionName, $u.SessionId, $u.State, $u.IdleTime, $u.LogonTime
-                            if ($Line.Length -gt $FrameWidth) { $Line = $Line.Substring(0, $FrameWidth) }
-                            if ($i -eq $UserRowIndex) { Write-Host $Line.PadRight($FrameWidth) -ForegroundColor Black -BackgroundColor White } 
-                            else { Write-Host $Line.PadRight($FrameWidth) }
-                        } else { Write-Host "".PadRight($FrameWidth) }
-                        $UserRowsDrawn++
-                    }
-                }
-                $EmptyRows = $CurrentPageSize - $UserRowsDrawn
-                if ($EmptyRows -gt 0) { for ($x=0; $x -lt $EmptyRows; $x++) { Write-Host ("".PadRight($FrameWidth)) } }
-                #endregion
-            } else {
-                #region MODE: LIVE PROCESS GRID
-                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
-                $FixedOverhead = 58
-                $NameW = [math]::Max(10, $FrameWidth - $FixedOverhead)
-                $ColWidths = @(8, $NameW, 10, 10, 10, 10)
-
-                Write-Host "  " -NoNewline
-                for ($i = 0; $i -lt $ColHeaders.Count; $i++) {
-                    $HText = $ColHeaders[$i]
-                    if ($i -eq $SelColIndex) { $Arrow = if ($IsDesc) { "▼" } else { "▲" }; $HText = "$HText$Arrow" }
-                    if ($HText.Length -gt $ColWidths[$i]) { $HText = $HText.Substring(0, $ColWidths[$i]) }
-                    $Fmt = "{0," + $ColAligns[$i] + $ColWidths[$i] + "}"
-                    if ($i -eq $SelColIndex) { Write-Host ($Fmt -f $HText) -ForegroundColor Black -BackgroundColor White -NoNewline } 
-                    else { Write-Host ($Fmt -f $HText) -ForegroundColor Gray -NoNewline }
-                    Write-Host " " -NoNewline
-                }
-                Write-Host "".PadRight(1); Write-Host ""; Write-Host ("─" * $FrameWidth) -ForegroundColor DarkGray
-                
-                $ListToShow = @()
+                Out-UserGrid -Users $SyncHash.UserData -SelectedRow $UserRowIndex -PageIndex $PageIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -SelColIndex $SelColIndex -IsDesc $IsDesc
+            }
+            else {
+                $Cores = if ($Static.Cores) { $Static.Cores } else { 1 }
+                $ListToRender = @()
                 if ($Paused) {
                     $FilteredList = $FrozenList
                     if ($FilterText) { $FilteredList = $FrozenList | Where-Object { $_.Name -like "*$FilterText*" } }
-                    $SortedList = $FilteredList | Sort-Object $RealProps[$SelColIndex] -Descending:$IsDesc
-                    $Start = $PageIndex * $CurrentPageSize
-                    $ListToShow = $SortedList | Select-Object -Skip $Start -First $CurrentPageSize
+                    $ListToRender = $FilteredList | Sort-Object $RealProps[$SelColIndex] -Descending:$IsDesc
                 } else {
-                    $SortedList = $SyncHash.RawProcessList | Sort-Object $RealProps[$SelColIndex] -Descending:$IsDesc
-                    $ListToShow = $SortedList | Select-Object -First $CurrentPageSize
+                    $ListToRender = $SyncHash.RawProcessList | Sort-Object $RealProps[$SelColIndex] -Descending:$IsDesc
                 }
-                
-                $RowsDrawn = 0
-                if ($ListToShow) {
-                    $CurrentListArray = @($ListToShow) 
-                    for ($i = 0; $i -lt $CurrentPageSize; $i++) {
-                        if ($i -lt $CurrentListArray.Count) {
-                            $p = $CurrentListArray[$i]
-                            
-                            # CLEANUP: Strip trailing WMI Instance tags (e.g. msedge#12 -> msedge)
-                            $NameVal = if ($p.Name) { $p.Name -replace '#\d+$','' } else { "Unknown" }
-                            if ($NameVal.Length -gt $NameW) { $NameVal = $NameVal.SubString(0, $NameW) }
-                            
-                            $Cores = if ($Static.Cores) { $Static.Cores } else { 1 }
-                            $RawCpu = if ($p.PercentProcessorTime) { $p.PercentProcessorTime } else { 0 }
-                            $CpuVal = [math]::Round($RawCpu / $Cores, 1)
-                            
-                            # V71 BUG FIX: WMI 'PercentProcessorTime' formatted counters are notorious 
-                            # for spiking to massive > 500% numbers due to timer overlap and wrap around. 
-                            # We strictly cap it at 100% to protect the column format alignment and stop scares.
-                            if ($CpuVal -gt 100) { $CpuVal = 100.0 }
-                            if ($CpuVal -lt 0) { $CpuVal = 0.0 }
-                            
-                            $MemVal = [math]::Round($p.WorkingSet / 1MB, 0)
-                            $Icon = if ($CpuVal -gt 50) { "🔥" } elseif ($CpuVal -gt 25) { "⚡" } else { " " }
-                            
-                            $Line = "{0} {1,-8} {2,-$NameW} {3,10:0.0} {4,10} {5,10} {6,10}" -f $Icon, $p.IDProcess, $NameVal, $CpuVal, $MemVal, $p.ThreadCount, $p.HandleCount
-
-                            if ($Paused -and $i -eq $RowIndex) { Write-Host $Line.PadRight($FrameWidth) -ForegroundColor Black -BackgroundColor Green } 
-                            else {
-                                $Color = "White"; $BgColor = "Black"
-                                if ($CpuVal -gt 75) { $Color = "Red" } 
-                                elseif ($CpuVal -gt 50) { $Color = "Yellow" } 
-                                elseif ($CpuVal -gt 25) { $Color = "Cyan" } 
-                                else { $Color = "Gray" }
-                                Write-Host $Line.PadRight($FrameWidth) -ForegroundColor $Color -BackgroundColor $BgColor
-                            }
-                        } else { Write-Host ("".PadRight($FrameWidth)) }
-                        $RowsDrawn++
-                    }
-                }
-                $EmptyRows = $CurrentPageSize - $RowsDrawn
-                if ($EmptyRows -gt 0) { for($x=0; $x -lt $EmptyRows; $x++) { Write-Host ("".PadRight($FrameWidth)) } }
-                #endregion
+                Out-ProcessGrid -ProcessList $ListToRender -SelectedRow $RowIndex -PageIndex $PageIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -SelColIndex $SelColIndex -IsDesc $IsDesc -Paused $Paused -Cores $Cores
             }
             #endregion
 
@@ -1186,6 +863,7 @@ function Start-SystemMonitor {
         try { $PS.EndInvoke($AsyncHandle) } catch {}
         try { $PS.Dispose() } catch {}
         try { [Console]::CursorVisible = $true } catch {}
+        Clear-Host
     }
     #endregion
 }
