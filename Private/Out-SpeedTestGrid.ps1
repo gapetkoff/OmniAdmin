@@ -1,3 +1,20 @@
+# Format helpers
+function Get-ProgressGauge {
+    param([double]$Percent)
+    $Width = 25
+    $Chars = [math]::Round(($Percent / 100.0) * $Width)
+    if ($Chars -lt 0) { $Chars = 0 }
+    if ($Chars -gt $Width) { $Chars = $Width }
+    $Bar = ("█" * $Chars) + ("░" * ($Width - $Chars))
+    return "[$Bar]"
+}
+
+function Format-SpeedVal {
+    param([double]$Mbps)
+    if ($Mbps -ge 1000) { return "$([math]::Round($Mbps / 1000, 2)) Gbps" }
+    return "$([math]::Round($Mbps, 2)) Mbps"
+}
+
 function Out-SpeedTestGrid {
     param(
         [hashtable]$SpeedTest,
@@ -7,21 +24,6 @@ function Out-SpeedTestGrid {
         [bool]$IsLocal,
         [string]$ComputerName
     )
-
-    # Format helpers
-    function Format-Speed([double]$Mbps) {
-        if ($Mbps -ge 1000) { return "$([math]::Round($Mbps / 1000, 2)) Gbps" }
-        return "$([math]::Round($Mbps, 2)) Mbps"
-    }
-
-    function Get-ProgressGauge([double]$Percent) {
-        $Width = 25
-        $Chars = [math]::Round(($Percent / 100.0) * $Width)
-        if ($Chars -lt 0) { $Chars = 0 }
-        if ($Chars -gt $Width) { $Chars = $Width }
-        $Bar = ("█" * $Chars) + ("░" * ($Width - $Chars))
-        return "[$Bar]"
-    }
 
     # Render top header line
     Write-Host "  NETWORK SPEED TEST CONFIGURATION & RESULTS" -ForegroundColor Yellow
@@ -98,20 +100,26 @@ function Out-SpeedTestGrid {
         $Lines += @{ Text = $ProgressLine; Highlight = $false; Fg = "DarkGray" }
     }
 
+    # Dynamic labels to clarify flow directions in P2P mode
+    $LabelLat = "    Latency:"
+    $LabelDl  = if ($SpeedTest.TestMode -eq "P2P") { "    From ${ComputerName}:" } else { "    Download:" }
+    $LabelUl  = if ($SpeedTest.TestMode -eq "P2P") { "    To ${ComputerName}:" } else { "    Upload:" }
+    $MaxL = [math]::Max($LabelLat.Length, [math]::Max($LabelDl.Length, $LabelUl.Length)) + 1
+
     # Latency
     $LatVal = if ($null -ne $SpeedTest.Results.Latency) { "$($SpeedTest.Results.Latency) ms" } else { "-- ms" }
     $LatFg = if ($null -ne $SpeedTest.Results.Latency) { "Green" } else { "DarkGray" }
-    $Lines += @{ Text = "    Latency:  $LatVal"; Highlight = $false; Fg = $LatFg }
+    $Lines += @{ Text = $LabelLat.PadRight($MaxL) + $LatVal; Highlight = $false; Fg = $LatFg }
 
-    # Download
-    $DlVal = if ($null -ne $SpeedTest.Results.Download) { "$(Format-Speed $SpeedTest.Results.Download)" } else { "-- Mbps" }
+    # Download / Flow From
+    $DlVal = if ($null -ne $SpeedTest.Results.Download) { "$(Format-SpeedVal $SpeedTest.Results.Download)" } else { "-- Mbps" }
     $DlFg = if ($null -ne $SpeedTest.Results.Download) { "Green" } else { "DarkGray" }
-    $Lines += @{ Text = "    Download: $DlVal"; Highlight = $false; Fg = $DlFg }
+    $Lines += @{ Text = $LabelDl.PadRight($MaxL) + $DlVal; Highlight = $false; Fg = $DlFg }
 
-    # Upload
-    $UlVal = if ($null -ne $SpeedTest.Results.Upload) { "$(Format-Speed $SpeedTest.Results.Upload)" } else { "-- Mbps" }
+    # Upload / Flow To
+    $UlVal = if ($null -ne $SpeedTest.Results.Upload) { "$(Format-SpeedVal $SpeedTest.Results.Upload)" } else { "-- Mbps" }
     $UlFg = if ($null -ne $SpeedTest.Results.Upload) { "Green" } else { "DarkGray" }
-    $Lines += @{ Text = "    Upload:   $UlVal"; Highlight = $false; Fg = $UlFg }
+    $Lines += @{ Text = $LabelUl.PadRight($MaxL) + $UlVal; Highlight = $false; Fg = $UlFg }
 
     # Draw lines
     $LinesDrawn = 0
