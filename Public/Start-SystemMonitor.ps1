@@ -88,6 +88,17 @@ function Start-SystemMonitor {
         CriticalError     = $false       
         ActionStatus      = ""
         DebugLog          = "Init..."
+        SpeedTest         = [hashtable]::Synchronized(@{
+            TestMode        = "Local"
+            TargetHost      = if ($ComputerName -ne "localhost") { $ComputerName } else { "" }
+            Threads         = 8
+            TimeoutSeconds  = 15
+            Port            = 5201
+            Running         = $false
+            ActivePhase     = "Idle"
+            ProgressPercent = 0.0
+            Results         = [hashtable]::Synchronized(@{ Latency = $null; Download = $null; Upload = $null; Error = "" })
+        })
     })
     #endregion
 
@@ -110,9 +121,14 @@ function Start-SystemMonitor {
     $ServiceMode = $false 
     $TaskMode    = $false
     $AppMode     = $false
+    $SpeedTestMode = $false
     $ShowServiceProps = $false 
     $ShowTaskProps    = $false
     $ShowMainMenu     = $false
+    
+    $IsLocal = ($ComputerName -eq "localhost" -or $ComputerName -eq "." -or $ComputerName -eq $env:COMPUTERNAME)
+    $SyncHash.SpeedTest.TestMode = if ($IsLocal) { "Local" } else { "Remote" }
+    $SpeedTestRowIndex = 0
     
     $FrozenList  = $null
     $FilterText  = ""
@@ -180,6 +196,21 @@ function Start-SystemMonitor {
             if ($SyncHash.StaticData -and $SyncHash.StaticData.GpuName) { $HEADER_HEIGHT += 3 }
             if ($Diagnostics) { $HEADER_HEIGHT += 1 }
 
+            # Check if Speed Test background runspace is completed
+            if ($SpeedTestPS -and $SpeedTestAsyncHandle -and $SpeedTestAsyncHandle.IsCompleted) {
+                try { $SpeedTestPS.EndInvoke($SpeedTestAsyncHandle) } catch {}
+                try { $SpeedTestPS.Dispose() } catch {}
+                $SpeedTestPS = $null
+                $SpeedTestAsyncHandle = $null
+            }
+
+            # Update progress percent smoothly during active network tests (Download/Upload)
+            if ($SyncHash.SpeedTest.Running -and ($SyncHash.SpeedTest.ActivePhase -in "Download", "Upload")) {
+                $Elapsed = ([DateTime]::UtcNow - $SyncHash.SpeedTest.PhaseStartTime).TotalSeconds
+                $Pct = [math]::Min(95.0, ($Elapsed / $SyncHash.SpeedTest.TimeoutSeconds) * 100.0)
+                $SyncHash.SpeedTest.ProgressPercent = $Pct
+            }
+
             $SyncHash.UserModeActive = $UserMode
             $SyncHash.ServiceModeActive = ($ServiceMode -and -not $ShowServiceProps)
             $SyncHash.TaskModeActive = ($TaskMode -and -not $ShowTaskProps)
@@ -217,7 +248,7 @@ function Start-SystemMonitor {
                 if ($Key -eq "M") { $ShowMainMenu = $true }
 
                 if ($Key -eq "Escape") { 
-                    $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $ShowMainMenu = $false; Clear-Host 
+                    $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SpeedTestMode = $false; $ShowMainMenu = $false; Clear-Host 
                 }
                 elseif ($Key -eq "P") {
                     if ($ServiceMode) { $ShowServiceProps = $true }
@@ -438,6 +469,102 @@ function Start-SystemMonitor {
                         "D5" { if ($SelColIndex -eq 4) { $IsDesc = -not $IsDesc } else { $SelColIndex = 4; $IsDesc = $true } }
                     }
                 }
+                # --- INPUT: SPEED TEST MODE ---
+                elseif ($SpeedTestMode) {
+                    if ($SyncHash.SpeedTest.Running) {
+                        # Do not allow modifying settings or triggering a test while running
+                    } else {
+                        $MaxRow = if ($IsLocal) { 3 } else { 4 }
+                        switch ($Key) {
+                            "UpArrow" {
+                                if ($SpeedTestRowIndex -gt 0) { $SpeedTestRowIndex-- }
+                            }
+                            "DownArrow" {
+                                if ($SpeedTestRowIndex -lt $MaxRow) { $SpeedTestRowIndex++ }
+                            }
+                            "LeftArrow" {
+                                if ($SpeedTestRowIndex -eq 0) {
+                                    if (-not $IsLocal) {
+                                        # Toggle Test Mode between Remote and P2P
+                                        $SyncHash.SpeedTest.TestMode = if ($SyncHash.SpeedTest.TestMode -eq "Remote") { "P2P" } else { "Remote" }
+                                    }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 1) {
+                                    if ($SyncHash.SpeedTest.Threads -gt 1) { $SyncHash.SpeedTest.Threads-- }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 2) {
+                                    if ($SyncHash.SpeedTest.TimeoutSeconds -gt 5) { $SyncHash.SpeedTest.TimeoutSeconds -= 5 }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 3 -and -not $IsLocal) {
+                                    if ($SyncHash.SpeedTest.Port -gt 1024) { $SyncHash.SpeedTest.Port-- }
+                                }
+                            }
+                            "RightArrow" {
+                                if ($SpeedTestRowIndex -eq 0) {
+                                    if (-not $IsLocal) {
+                                        $SyncHash.SpeedTest.TestMode = if ($SyncHash.SpeedTest.TestMode -eq "Remote") { "P2P" } else { "Remote" }
+                                    }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 1) {
+                                    if ($SyncHash.SpeedTest.Threads -lt 64) { $SyncHash.SpeedTest.Threads++ }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 2) {
+                                    if ($SyncHash.SpeedTest.TimeoutSeconds -lt 60) { $SyncHash.SpeedTest.TimeoutSeconds += 5 }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 3 -and -not $IsLocal) {
+                                    if ($SyncHash.SpeedTest.Port -lt 65535) { $SyncHash.SpeedTest.Port++ }
+                                }
+                            }
+                            "Enter" {
+                                if ($SpeedTestRowIndex -eq 1) {
+                                    try { [Console]::CursorVisible = $true } catch {}
+                                    try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
+                                    Write-Host " ENTER THREADS (1-64): " -NoNewline -ForegroundColor Cyan
+                                    $Val = Read-Host
+                                    if ($Val -match "^\d+$") {
+                                        $IntVal = [int]$Val
+                                        if ($IntVal -ge 1 -and $IntVal -le 64) { $SyncHash.SpeedTest.Threads = $IntVal }
+                                    }
+                                    try { [Console]::CursorVisible = $false } catch {}
+                                    Clear-Host
+                                }
+                                elseif ($SpeedTestRowIndex -eq 2) {
+                                    try { [Console]::CursorVisible = $true } catch {}
+                                    try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
+                                    Write-Host " ENTER TIMEOUT SECONDS (5-60): " -NoNewline -ForegroundColor Cyan
+                                    $Val = Read-Host
+                                    if ($Val -match "^\d+$") {
+                                        $IntVal = [int]$Val
+                                        if ($IntVal -ge 5 -and $IntVal -le 60) { $SyncHash.SpeedTest.TimeoutSeconds = $IntVal }
+                                    }
+                                    try { [Console]::CursorVisible = $false } catch {}
+                                    Clear-Host
+                                }
+                                elseif ($SpeedTestRowIndex -eq 3) {
+                                    if ($IsLocal) {
+                                        $TriggerSpeedTest = $true
+                                    } else {
+                                        if ($SyncHash.SpeedTest.TestMode -eq "P2P") {
+                                            try { [Console]::CursorVisible = $true } catch {}
+                                            try { [Console]::SetCursorPosition(0, $Host.UI.RawUI.WindowSize.Height - 1) } catch {}
+                                            Write-Host " ENTER P2P PORT (1024-65535): " -NoNewline -ForegroundColor Cyan
+                                            $Val = Read-Host
+                                            if ($Val -match "^\d+$") {
+                                                $IntVal = [int]$Val
+                                                if ($IntVal -ge 1024 -and $IntVal -le 65535) { $SyncHash.SpeedTest.Port = $IntVal }
+                                            }
+                                            try { [Console]::CursorVisible = $false } catch {}
+                                            Clear-Host
+                                        }
+                                    }
+                                }
+                                elseif ($SpeedTestRowIndex -eq 4 -and -not $IsLocal) {
+                                    $TriggerSpeedTest = $true
+                                }
+                            }
+                        }
+                    }
+                }
                 # --- INPUT: LIVE ---
                 else {
                     switch ($Key) {
@@ -455,6 +582,207 @@ function Start-SystemMonitor {
                 }
             }
             #endregion
+
+            # --- TRIGGER SPEED TEST RUNNER ---
+            if ($TriggerSpeedTest) {
+                $TriggerSpeedTest = $false
+                $SyncHash.SpeedTest.Running = $true
+                $SyncHash.SpeedTest.ActivePhase = "Latency"
+                $SyncHash.SpeedTest.ProgressPercent = 0.0
+                $SyncHash.SpeedTest.Results.Latency = $null
+                $SyncHash.SpeedTest.Results.Download = $null
+                $SyncHash.SpeedTest.Results.Upload = $null
+                $SyncHash.SpeedTest.Results.Error = ""
+                
+                $InitNetEngineSB = ${function:Initialize-NetworkEngine}
+                
+                $STWorker = {
+                    param($SyncHash, $InitNetEngineSB, $ComputerName)
+                    try {
+                        function Initialize-NetworkEngine { & $InitNetEngineSB }
+                        if (-not ("NativeNetworkTest" -as [type])) {
+                            Initialize-NetworkEngine
+                        }
+                        
+                        $Threads = $SyncHash.SpeedTest.Threads
+                        $Timeout = $SyncHash.SpeedTest.TimeoutSeconds
+                        $Port = $SyncHash.SpeedTest.Port
+                        $Target = $ComputerName
+                        $Mode = $SyncHash.SpeedTest.TestMode
+                        
+                        # --- PHASE 1: LATENCY ---
+                        $SyncHash.SpeedTest.ActivePhase = "Latency"
+                        $SyncHash.SpeedTest.ProgressPercent = 10
+                        
+                        $PingTarget = if ($Mode -eq "Local") { "speed.cloudflare.com" } else { $Target }
+                        $PingPort = if ($Mode -eq "Local") { 443 } else { 5985 }
+                        
+                        if ($Mode -eq "P2P" -and -not $Target) {
+                            throw "Target Host is required for Peer-to-Peer test."
+                        }
+                        if ($Mode -eq "Remote" -and -not $Target) {
+                            throw "Target Host is required for Remote test."
+                        }
+                        
+                        $measurements = @()
+                        for ($i = 0; $i -lt 10; $i++) {
+                            $tcp = New-Object System.Net.Sockets.TcpClient
+                            try {
+                                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                                $tcp.Connect($PingTarget, $PingPort)
+                                $sw.Stop()
+                                $measurements += $sw.Elapsed.TotalMilliseconds
+                            }
+                            catch {
+                                # Ignore single connection failures
+                            }
+                            finally { $tcp.Dispose() }
+                            $SyncHash.SpeedTest.ProgressPercent = 10 + ($i * 10)
+                            Start-Sleep -Milliseconds 100
+                        }
+                        if ($measurements.Count -gt 0) {
+                            $SyncHash.SpeedTest.Results.Latency = [math]::Round(($measurements | Measure-Object -Average).Average, 1)
+                        } else {
+                            $SyncHash.SpeedTest.Results.Latency = 0.0
+                        }
+                        
+                        # --- PHASE 2: DOWNLOAD ---
+                        $SyncHash.SpeedTest.ActivePhase = "Download"
+                        $SyncHash.SpeedTest.ProgressPercent = 0.0
+                        $SyncHash.SpeedTest.PhaseStartTime = [DateTime]::UtcNow
+                        
+                        $dlSpeed = 0.0
+                        if ($Mode -eq "Local") {
+                            $downUrl = "https://speed.cloudflare.com/__down?bytes=50000000"
+                            $dlSpeed = [NativeNetworkTest]::Download($downUrl, $Threads, $Timeout)
+                        }
+                        elseif ($Mode -eq "Remote") {
+                            $remoteScript = [scriptblock]::Create(@"
+                                function Initialize-NetworkEngine { $InitNetEngineSB }
+                                Initialize-NetworkEngine
+                                [NativeNetworkTest]::Download('https://speed.cloudflare.com/__down?bytes=50000000', $Threads, $Timeout)
+"@)
+                            $params = @{
+                                ComputerName = $Target
+                                ScriptBlock  = $remoteScript
+                            }
+                            if ($SyncHash.Credential) { $params['Credential'] = $SyncHash.Credential }
+                            $dlSpeed = Invoke-Command @params
+                        }
+                        elseif ($Mode -eq "P2P") {
+                            # Local IP
+                            $udp = New-Object System.Net.Sockets.UdpClient
+                            $udp.Connect($Target, 1)
+                            $localIP = $udp.Client.LocalEndPoint.Address.ToString()
+                            $udp.Close()
+                            
+                            # Local firewall rule
+                            New-NetFirewallRule -DisplayName "OmniAdmin-PeerTest" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
+                            $fwCreated = $true
+                            
+                            # Remote worker
+                            $workerLifetime = ($Timeout * 3) + 60
+                            $totalConnections = ($Threads * 2) + 1
+                            $workerScript = [scriptblock]::Create(@"
+                                function Initialize-NetworkEngine { $InitNetEngineSB }
+                                Initialize-NetworkEngine
+                                [PeerSpeedTest]::WorkerConnect('$localIP', $Port, $totalConnections, $workerLifetime)
+"@)
+                            $jobParams = @{
+                                ComputerName = $Target
+                                ScriptBlock  = $workerScript
+                                AsJob        = $true
+                            }
+                            if ($SyncHash.Credential) { $jobParams['Credential'] = $SyncHash.Credential }
+                            $workerJob = Invoke-Command @jobParams
+                            
+                            # Measure download
+                            $dlSpeed = [PeerSpeedTest]::MeasureDownload($Port, $Threads, $Timeout)
+                            
+                            # Cleanup
+                            try { [PeerSpeedTest]::KillWorkers($Port) } catch {}
+                            if ($workerJob) { Remove-Job -Force $workerJob -ErrorAction SilentlyContinue }
+                            if ($fwCreated) { Remove-NetFirewallRule -DisplayName "OmniAdmin-PeerTest" -ErrorAction SilentlyContinue; $fwCreated = $false }
+                        }
+                        $SyncHash.SpeedTest.Results.Download = $dlSpeed
+                        $SyncHash.SpeedTest.ProgressPercent = 100.0
+                        
+                        # --- PHASE 3: UPLOAD ---
+                        $SyncHash.SpeedTest.ActivePhase = "Upload"
+                        $SyncHash.SpeedTest.ProgressPercent = 0.0
+                        $SyncHash.SpeedTest.PhaseStartTime = [DateTime]::UtcNow
+                        
+                        $ulSpeed = 0.0
+                        if ($Mode -eq "Local") {
+                            $upUrl = "https://speed.cloudflare.com/__up"
+                            $ulSpeed = [NativeNetworkTest]::Upload($upUrl, $Threads, $Timeout)
+                        }
+                        elseif ($Mode -eq "Remote") {
+                            $remoteScript = [scriptblock]::Create(@"
+                                function Initialize-NetworkEngine { $InitNetEngineSB }
+                                Initialize-NetworkEngine
+                                [NativeNetworkTest]::Upload('https://speed.cloudflare.com/__up', $Threads, $Timeout)
+"@)
+                            $params = @{
+                                ComputerName = $Target
+                                ScriptBlock  = $remoteScript
+                            }
+                            if ($SyncHash.Credential) { $params['Credential'] = $SyncHash.Credential }
+                            $ulSpeed = Invoke-Command @params
+                        }
+                        elseif ($Mode -eq "P2P") {
+                            # Local IP
+                            $udp = New-Object System.Net.Sockets.UdpClient
+                            $udp.Connect($Target, 1)
+                            $localIP = $udp.Client.LocalEndPoint.Address.ToString()
+                            $udp.Close()
+                            
+                            # Local firewall rule
+                            New-NetFirewallRule -DisplayName "OmniAdmin-PeerTest" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
+                            $fwCreated = $true
+                            
+                            # Remote worker
+                            $workerLifetime = ($Timeout * 3) + 60
+                            $totalConnections = ($Threads * 2) + 1
+                            $workerScript = [scriptblock]::Create(@"
+                                function Initialize-NetworkEngine { $InitNetEngineSB }
+                                Initialize-NetworkEngine
+                                [PeerSpeedTest]::WorkerConnect('$localIP', $Port, $totalConnections, $workerLifetime)
+"@)
+                            $jobParams = @{
+                                ComputerName = $Target
+                                ScriptBlock  = $workerScript
+                                AsJob        = $true
+                            }
+                            if ($SyncHash.Credential) { $jobParams['Credential'] = $SyncHash.Credential }
+                            $workerJob = Invoke-Command @jobParams
+                            
+                            # Measure upload
+                            $ulSpeed = [PeerSpeedTest]::MeasureUpload($Port, $Threads, $Timeout)
+                            
+                            # Cleanup
+                            try { [PeerSpeedTest]::KillWorkers($Port) } catch {}
+                            if ($workerJob) { Remove-Job -Force $workerJob -ErrorAction SilentlyContinue }
+                            if ($fwCreated) { Remove-NetFirewallRule -DisplayName "OmniAdmin-PeerTest" -ErrorAction SilentlyContinue; $fwCreated = $false }
+                        }
+                        $SyncHash.SpeedTest.Results.Upload = $ulSpeed
+                        $SyncHash.SpeedTest.ProgressPercent = 100.0
+                        $SyncHash.SpeedTest.ActivePhase = "Done"
+                    }
+                    catch {
+                        $SyncHash.SpeedTest.Results.Error = $_.Exception.Message
+                        $SyncHash.SpeedTest.ActivePhase = "Error"
+                        if ($fwCreated) { Remove-NetFirewallRule -DisplayName "OmniAdmin-PeerTest" -ErrorAction SilentlyContinue }
+                    }
+                    finally {
+                        $SyncHash.SpeedTest.Running = $false
+                    }
+                }
+                
+                $SpeedTestPS = [PowerShell]::Create()
+                $null = $SpeedTestPS.AddScript($STWorker).AddArgument($SyncHash).AddArgument($InitNetEngineSB).AddArgument($ComputerName)
+                $SpeedTestAsyncHandle = $SpeedTestPS.BeginInvoke()
+            }
 
             #region PREPARE: VIEW STATE
             # Prepare Header and Footer data based on current mode
@@ -543,6 +871,17 @@ function Start-SystemMonitor {
                 
                 $FooterText = " [S] Search  │  [1-5] Sort  │  [←/→] Page  │  [M] Menu  │  [ESC] Back "
                 $FooterBg   = "DarkGreen"; $FooterFg = "White"
+            }
+            elseif ($SpeedTestMode) {
+                $CurrentPageSize = Get-DynamicPageSize -HeaderHeight $HEADER_HEIGHT -UseFixedPageSize $UseFixedPageSize -PageSize $PageSize -Padding 1
+                $HeaderText = " ⚡ NETWORK SPEED TEST "
+                $HeaderBg   = "DarkMagenta"; $HeaderFg = "White"
+                if ($SyncHash.SpeedTest.Running) {
+                    $FooterText = " Testing in progress... Please do not close or resize the terminal. "
+                } else {
+                    $FooterText = " [↕] Select Field  │  [←/→] Adjust  │  [Enter] Edit/Start  │  [M] Menu  │  [ESC] Back "
+                }
+                $FooterBg   = "DarkMagenta"; $FooterFg = "White"
             }
             elseif ($Paused) {
                 $FilteredList = $FrozenList
@@ -680,6 +1019,9 @@ function Start-SystemMonitor {
             elseif ($UserMode) {
                 Out-UserGrid -Users $SyncHash.UserData -SelectedRow $UserRowIndex -PageIndex $PageIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -SelColIndex $SelColIndex -IsDesc $IsDesc
             }
+            elseif ($SpeedTestMode) {
+                Out-SpeedTestGrid -SpeedTest $SyncHash.SpeedTest -SelectedRow $SpeedTestRowIndex -PageSize $CurrentPageSize -FrameWidth $FrameWidth -IsLocal $IsLocal -ComputerName $ComputerName
+            }
             else {
                 $Cores = if ($Static.Cores) { $Static.Cores } else { 1 }
                 $ListToRender = @()
@@ -779,9 +1121,9 @@ function Start-SystemMonitor {
             }
             # --- MAIN MENU ---
             if ($ShowMainMenu) {
-                $MenuOpts = @("Live Monitor", "Services", "Scheduled Tasks", "Installed Apps", "User Sessions", "Quit")
+                $MenuOpts = @("Live Monitor", "Services", "Scheduled Tasks", "Installed Apps", "User Sessions", "Speed Test", "Quit")
                 $MenuIndex = 0
-                $BoxWidth = 40; $BoxHeight = 9
+                $BoxWidth = 40; $BoxHeight = 10
                 $StartX = [math]::Floor(($CurrentWidth - $BoxWidth) / 2)
                 $StartY = [math]::Floor(($CurrentHeight - $BoxHeight) / 2)
                 
@@ -789,7 +1131,7 @@ function Start-SystemMonitor {
                 for ($y = 0; $y -le $BoxHeight; $y++) { [Console]::SetCursorPosition($StartX, $StartY + $y); Write-Host (" " * $BoxWidth) -BackgroundColor DarkBlue -NoNewline }
                 [Console]::SetCursorPosition($StartX + 2, $StartY + 1); Write-Host "MAIN MENU" -ForegroundColor Yellow -BackgroundColor DarkBlue
                 $MenuDirty = $true
-
+                
                 while ($ShowMainMenu) {
                     # Only repaint menu items when selection changed
                     if ($MenuDirty) {
@@ -797,7 +1139,7 @@ function Start-SystemMonitor {
                         for ($i = 0; $i -lt $MenuOpts.Count; $i++) {
                             [Console]::SetCursorPosition($StartX + 4, $StartY + 3 + $i)
                             $Prefix = "[$($i+1)]"
-                            if ($i -eq 5) { $Prefix = "[Q]" }
+                            if ($i -eq 6) { $Prefix = "[Q]" }
                             
                             if ($i -eq $MenuIndex) { Write-Host " > $Prefix $($MenuOpts[$i]) " -ForegroundColor Black -BackgroundColor White -NoNewline } 
                             else { Write-Host "   $Prefix $($MenuOpts[$i]) " -ForegroundColor White -BackgroundColor DarkBlue -NoNewline }
@@ -806,26 +1148,28 @@ function Start-SystemMonitor {
                     if ([Console]::KeyAvailable) {
                         $k = [Console]::ReadKey($true).Key
                         if ($k -eq 'UpArrow' -and $MenuIndex -gt 0) { $MenuIndex--; $MenuDirty = $true }
-                        if ($k -eq 'DownArrow' -and $MenuIndex -lt 5) { $MenuIndex++; $MenuDirty = $true }
+                        if ($k -eq 'DownArrow' -and $MenuIndex -lt 6) { $MenuIndex++; $MenuDirty = $true }
                         if ($k -eq 'Escape') { $ShowMainMenu = $false; $NeedsRedraw = $true; Clear-Host }
                         if ($k -eq 'Enter') {
                             $ShowMainMenu = $false
                             switch ($MenuIndex) {
-                                0 { $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 2; $IsDesc = $true } # Live defaults to CPU desc
-                                1 { $ServiceMode = $true; $UserMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 1; $IsDesc = $false } # Services defaults to Name asc
-                                2 { $TaskMode = $true; $ServiceMode = $false; $UserMode = $false; $AppMode = $false; $SelColIndex = 1; $IsDesc = $false } # Tasks defaults to Task Name asc
-                                3 { $AppMode = $true; $TaskMode = $false; $ServiceMode = $false; $UserMode = $false; $SelColIndex = 0; $IsDesc = $false } # Installed Apps defaults to Name asc (A-Z)
-                                4 { $UserMode = $true; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 0; $IsDesc = $false } # Users defaults to Username asc
-                                5 { return }
+                                0 { $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SpeedTestMode = $false; $SelColIndex = 2; $IsDesc = $true } # Live defaults to CPU desc
+                                1 { $ServiceMode = $true; $UserMode = $false; $TaskMode = $false; $AppMode = $false; $SpeedTestMode = $false; $SelColIndex = 1; $IsDesc = $false } # Services defaults to Name asc
+                                2 { $TaskMode = $true; $ServiceMode = $false; $UserMode = $false; $AppMode = $false; $SpeedTestMode = $false; $SelColIndex = 1; $IsDesc = $false } # Tasks defaults to Task Name asc
+                                3 { $AppMode = $true; $TaskMode = $false; $ServiceMode = $false; $UserMode = $false; $SpeedTestMode = $false; $SelColIndex = 0; $IsDesc = $false } # Installed Apps defaults to Name asc (A-Z)
+                                4 { $UserMode = $true; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SpeedTestMode = $false; $SelColIndex = 0; $IsDesc = $false } # Users defaults to Username asc
+                                5 { $SpeedTestMode = $true; $UserMode = $false; $ServiceMode = $false; $TaskMode = $false; $AppMode = $false; $SelColIndex = 0; $IsDesc = $false } # Speed Test
+                                6 { return }
                             }
                             $SvcRowIndex = 0; $TaskRowIndex = 0; $UserRowIndex = 0; $AppRowIndex = 0; $PageIndex = 0; $NeedsRedraw = $true; Clear-Host
                         }
-                        # Hotkeys 1-5 and Q
-                        if ($k -eq 'D1') { $ShowMainMenu = $false; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 2; $IsDesc = $true; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D2') { $ShowMainMenu = $false; $ServiceMode=$true; $UserMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 1; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D3') { $ShowMainMenu = $false; $TaskMode=$true; $ServiceMode=$false; $UserMode=$false; $AppMode=$false; $SelColIndex = 1; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D4') { $ShowMainMenu = $false; $AppMode=$true; $TaskMode=$false; $ServiceMode=$false; $UserMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
-                        if ($k -eq 'D5') { $ShowMainMenu = $false; $UserMode=$true; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        # Hotkeys 1-6 and Q
+                        if ($k -eq 'D1') { $ShowMainMenu = $false; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SpeedTestMode=$false; $SelColIndex = 2; $IsDesc = $true; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D2') { $ShowMainMenu = $false; $ServiceMode=$true; $UserMode=$false; $TaskMode=$false; $AppMode=$false; $SpeedTestMode=$false; $SelColIndex = 1; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D3') { $ShowMainMenu = $false; $TaskMode=$true; $ServiceMode=$false; $UserMode=$false; $AppMode=$false; $SpeedTestMode=$false; $SelColIndex = 1; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D4') { $ShowMainMenu = $false; $AppMode=$true; $TaskMode=$false; $ServiceMode=$false; $UserMode=$false; $SpeedTestMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D5') { $ShowMainMenu = $false; $UserMode=$true; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SpeedTestMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
+                        if ($k -eq 'D6') { $ShowMainMenu = $false; $SpeedTestMode=$true; $UserMode=$false; $ServiceMode=$false; $TaskMode=$false; $AppMode=$false; $SelColIndex = 0; $IsDesc = $false; $NeedsRedraw = $true; Clear-Host }
                         if ($k -eq 'Q')  { return }
                     }
                     Start-Sleep -Milliseconds 50
@@ -867,6 +1211,9 @@ function Start-SystemMonitor {
         $SyncHash.Running = $false
         try { $PS.EndInvoke($AsyncHandle) } catch {}
         try { $PS.Dispose() } catch {}
+        if ($SpeedTestPS) {
+            try { $SpeedTestPS.Dispose() } catch {}
+        }
         try { [Console]::CursorVisible = $true } catch {}
         Clear-Host
     }

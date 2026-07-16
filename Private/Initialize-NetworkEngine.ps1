@@ -16,12 +16,25 @@ using System.Threading.Tasks;
 using System.Threading;
 
 public class NativeNetworkTest {
-    private static readonly HttpClient client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient client;
+
+    static NativeNetworkTest() {
+        client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        try {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        } catch {}
+        
+        uploadPayload = new byte[1 * 1024 * 1024]; // 1MB Chunk (moved from static constructor)
+        new Random().NextBytes(uploadPayload);
+    }
 
     // --- DOWNLOAD ENGINE ---
     public static double Download(string url, int threads, int timeoutSeconds) {
         var tasks = new Task<long>[threads]; 
         var sw = Stopwatch.StartNew();
+        
+        string activeUrl = url;
+        string fallbackUrl = "https://download.sysinternals.com/files/SysinternalsSuite.zip";
 
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds))) {
             var token = cts.Token;
@@ -30,14 +43,22 @@ public class NativeNetworkTest {
                     long totalBytes = 0;
                     while (!token.IsCancellationRequested) {
                         try {
-                            using (var request = new HttpRequestMessage(HttpMethod.Get, url)) {
-                                request.Version = new Version(1, 1); // Force HTTP/1.1 to prevent HTTP/2 multiplexing bounds
-                                using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token))
-                                using (var stream = await response.Content.ReadAsStreamAsync()) {
-                                    var buffer = new byte[81920]; 
-                                    int bytesRead;
-                                    while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0) {
-                                        totalBytes += bytesRead;
+                            string currentUrl = activeUrl;
+                            using (var request = new HttpRequestMessage(HttpMethod.Get, currentUrl)) {
+                                request.Version = new Version(1, 1); // Force HTTP/1.1
+                                using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)) {
+                                    if (!response.IsSuccessStatusCode) {
+                                        if (activeUrl == url) {
+                                            activeUrl = fallbackUrl;
+                                        }
+                                        throw new HttpRequestException("HTTP non-success response status");
+                                    }
+                                    using (var stream = await response.Content.ReadAsStreamAsync()) {
+                                        var buffer = new byte[81920]; 
+                                        int bytesRead;
+                                        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0) {
+                                            totalBytes += bytesRead;
+                                        }
                                     }
                                 }
                             }
@@ -68,11 +89,6 @@ public class NativeNetworkTest {
 
     // --- UPLOAD ENGINE ---
     private static readonly byte[] uploadPayload;
-
-    static NativeNetworkTest() {
-        uploadPayload = new byte[1 * 1024 * 1024]; // 1MB Chunk (optimized down from 5MB)
-        new Random().NextBytes(uploadPayload);
-    }
 
     public static double Upload(string url, int threads, int timeoutSeconds) {
         var tasks = new Task<long>[threads]; 
@@ -122,7 +138,7 @@ public class NativeNetworkTest {
 
     # Ensure the type isn't added twice if module is re-imported into the same session
     if (-not ("NativeNetworkTest" -as [type])) {
-        Add-Type -TypeDefinition $cSharpCode -ReferencedAssemblies System.Net.Http
+        Add-Type -TypeDefinition $cSharpCode -ReferencedAssemblies "System.Net.Http", "System.Net.Primitives"
     }
 
     # --- PEER-TO-PEER TCP ENGINE (Reverse-Connection Architecture) ---

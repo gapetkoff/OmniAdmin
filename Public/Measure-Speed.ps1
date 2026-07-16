@@ -14,7 +14,7 @@
     - Peer-to-Peer mode (-PeerToPeer) for measuring LAN throughput between two machines.
 
 .PARAMETER Threads
-    The number of concurrent streams to use. Defaults to 32. 
+    The number of concurrent streams to use. Defaults to 8. 
     Higher numbers (up to 64) may be needed for Gigabit+ connections.
 
 .PARAMETER TimeoutSeconds
@@ -62,7 +62,7 @@ function Measure-Speed {
         [Parameter(Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [string[]]$ComputerName,
 
-        [int]$Threads = 32,
+        [int]$Threads = 8,
         
         [int]$TimeoutSeconds = 15,
         
