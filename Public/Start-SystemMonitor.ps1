@@ -151,7 +151,10 @@ function Start-SystemMonitor {
         $STWorker = {
             param($SyncHash, $InitNetEngineSB, $ComputerName)
             try {
-                function Initialize-NetworkEngine { & $InitNetEngineSB }
+                # $InitNetEngineSB arrives as a plain string when launched from C# TuiEngine.
+                # Wrap in [scriptblock]::Create() so & executes it as code, not a command name.
+                $InitSB = [scriptblock]::Create($InitNetEngineSB)
+                function Initialize-NetworkEngine { & $InitSB }
                 if (-not ("NativeNetworkTest" -as [type])) {
                     Initialize-NetworkEngine
                 }
@@ -209,11 +212,12 @@ function Start-SystemMonitor {
                     $dlSpeed = [NativeNetworkTest]::Download($downUrl, $Threads, $Timeout)
                 }
                 elseif ($Mode -eq "Remote") {
-                    $remoteScript = [scriptblock]::Create(@"
-                        function Initialize-NetworkEngine { $InitNetEngineSB }
-                        Initialize-NetworkEngine
-                        [NativeNetworkTest]::Download('https://speed.cloudflare.com/__down?bytes=50000000', $Threads, $Timeout)
-"@)
+                    # Build remote scriptblock via string concat to avoid here-string/interpolation issues
+                    $initBody = $InitNetEngineSB.ToString()
+                    $remoteScriptText = "function Initialize-NetworkEngine { " + $initBody + " }`n" +
+                                        "Initialize-NetworkEngine`n" +
+                                        "[NativeNetworkTest]::Download('https://speed.cloudflare.com/__down?bytes=50000000', $Threads, $Timeout)"
+                    $remoteScript = [scriptblock]::Create($remoteScriptText)
                     $params = @{
                         ComputerName = $Target
                         ScriptBlock  = $remoteScript
@@ -232,14 +236,14 @@ function Start-SystemMonitor {
                     New-NetFirewallRule -DisplayName "OmniAdmin-PeerTest" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
                     $fwCreated = $true
                     
-                    # Remote worker
+                    # Remote worker — build via string concat to avoid here-string issues
+                    $initBody = $InitNetEngineSB.ToString()
                     $workerLifetime = ($Timeout * 3) + 60
                     $totalConnections = ($Threads * 2) + 1
-                    $workerScript = [scriptblock]::Create(@"
-                        function Initialize-NetworkEngine { $InitNetEngineSB }
-                        Initialize-NetworkEngine
-                        [PeerSpeedTest]::WorkerConnect('$localIP', $Port, $totalConnections, $workerLifetime)
-"@)
+                    $workerScriptText = "function Initialize-NetworkEngine { " + $initBody + " }`n" +
+                                        "Initialize-NetworkEngine`n" +
+                                        "[PeerSpeedTest]::WorkerConnect('$localIP', $Port, $totalConnections, $workerLifetime)"
+                    $workerScript = [scriptblock]::Create($workerScriptText)
                     $jobParams = @{
                         ComputerName = $Target
                         ScriptBlock  = $workerScript
@@ -270,11 +274,11 @@ function Start-SystemMonitor {
                     $ulSpeed = [NativeNetworkTest]::Upload($upUrl, $Threads, $Timeout)
                 }
                 elseif ($Mode -eq "Remote") {
-                    $remoteScript = [scriptblock]::Create(@"
-                        function Initialize-NetworkEngine { $InitNetEngineSB }
-                        Initialize-NetworkEngine
-                        [NativeNetworkTest]::Upload('https://speed.cloudflare.com/__up', $Threads, $Timeout)
-"@)
+                    $initBody = $InitNetEngineSB.ToString()
+                    $remoteScriptText = "function Initialize-NetworkEngine { " + $initBody + " }`n" +
+                                        "Initialize-NetworkEngine`n" +
+                                        "[NativeNetworkTest]::Upload('https://speed.cloudflare.com/__up', $Threads, $Timeout)"
+                    $remoteScript = [scriptblock]::Create($remoteScriptText)
                     $params = @{
                         ComputerName = $Target
                         ScriptBlock  = $remoteScript
@@ -294,13 +298,13 @@ function Start-SystemMonitor {
                     $fwCreated = $true
                     
                     # Remote worker
+                    $initBody = $InitNetEngineSB.ToString()
                     $workerLifetime = ($Timeout * 3) + 60
                     $totalConnections = ($Threads * 2) + 1
-                    $workerScript = [scriptblock]::Create(@"
-                        function Initialize-NetworkEngine { $InitNetEngineSB }
-                        Initialize-NetworkEngine
-                        [PeerSpeedTest]::WorkerConnect('$localIP', $Port, $totalConnections, $workerLifetime)
-"@)
+                    $workerScriptText = "function Initialize-NetworkEngine { " + $initBody + " }`n" +
+                                        "Initialize-NetworkEngine`n" +
+                                        "[PeerSpeedTest]::WorkerConnect('$localIP', $Port, $totalConnections, $workerLifetime)"
+                    $workerScript = [scriptblock]::Create($workerScriptText)
                     $jobParams = @{
                         ComputerName = $Target
                         ScriptBlock  = $workerScript

@@ -61,13 +61,47 @@ namespace OmniAdmin {
         public static double GetDouble(object obj, string name) {
             var val = GetProperty(obj, name);
             if (val == null) return 0;
+            val = Unwrap(val);
             try { return Convert.ToDouble(val); } catch { return 0; }
         }
 
         public static int GetInt(object obj, string name) {
             var val = GetProperty(obj, name);
             if (val == null) return 0;
+            val = Unwrap(val);
             try { return Convert.ToInt32(val); } catch { return 0; }
+        }
+
+        // Peel off PSObject wrapper so Convert.To* receives the actual CLR value.
+        // Values from remote Invoke-Command are deserialized as PSObject<bool>, PSObject<double> etc.
+        // and throw IConvertible exceptions when passed directly to Convert.ToBoolean / ToDouble / ToInt32.
+        public static object Unwrap(object val) {
+            if (val == null) return null;
+            if (val.GetType().FullName == "System.Management.Automation.PSObject") {
+                try {
+                    var bo = val.GetType().GetProperty("BaseObject").GetValue(val, null);
+                    if (bo != null && !(bo is PSObject)) return bo;
+                } catch {}
+            }
+            return val;
+        }
+
+        public static bool ToBool(object val) {
+            if (val == null) return false;
+            val = Unwrap(val);
+            try { return Convert.ToBoolean(val); } catch { return false; }
+        }
+
+        public static double ToNum(object val, double fallback = 0.0) {
+            if (val == null) return fallback;
+            val = Unwrap(val);
+            try { return Convert.ToDouble(val); } catch { return fallback; }
+        }
+
+        public static int ToInt(object val, int fallback = 0) {
+            if (val == null) return fallback;
+            val = Unwrap(val);
+            try { return Convert.ToInt32(val); } catch { return fallback; }
         }
 
         public static List<object> GetSortedList(IEnumerable list, string propName, bool desc) {
@@ -137,7 +171,7 @@ namespace OmniAdmin {
             int lastWidth = Console.WindowWidth;
             int lastHeight = Console.WindowHeight;
 
-            while (Convert.ToBoolean(syncHash["Running"])) {
+            while (ToBool(syncHash["Running"])) {
                 int width = Console.WindowWidth;
                 int height = Console.WindowHeight;
 
@@ -165,13 +199,13 @@ namespace OmniAdmin {
 
                 // Smooth speed test progress calculation
                 var st = syncHash["SpeedTest"] as IDictionary;
-                if (st != null && Convert.ToBoolean(st["Running"])) {
+                if (st != null && ToBool(st["Running"])) {
                     string actPhase = GetString(st["ActivePhase"]);
                     if (actPhase == "Download" || actPhase == "Upload") {
                         if (st["PhaseStartTime"] is DateTime) {
                             DateTime startTime = (DateTime)st["PhaseStartTime"];
                             double elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-                            double limit = Convert.ToDouble(st["TimeoutSeconds"] ?? 15);
+                            double limit = ToNum(st["TimeoutSeconds"], 15);
                             double pct = Math.Min(95.0, (elapsed / limit) * 100.0);
                             st["ProgressPercent"] = pct;
                         }
@@ -200,7 +234,7 @@ namespace OmniAdmin {
 
                 // --- BUILD BUFFER ---
                 StringBuilder sb = new StringBuilder();
-                sb.Append("\x1b[H"); // Cursor to Home
+                sb.Append("\x1b[H\x1b[0m"); // Cursor to Home + full color reset to prevent first-row color bleed
 
                 // --- RESOLVE DATA GRID ---
                 List<object> listToRender = new List<object>();
@@ -365,7 +399,7 @@ namespace OmniAdmin {
                     int pCount = GetInt(sysData, "Processes");
                     int tCount = GetInt(sysData, "ThreadCount");
                     int uCount = 0;
-                    var userDataList = syncHash["UserData"] as ICollection;
+                    var userDataList = Unwrap(syncHash["UserData"]) as ICollection;
                     if (userDataList != null) uCount = userDataList.Count;
                     string procLine = string.Format(" Processes: {0}  |  Threads: {1}  |  Users: {2}", pCount, tCount, uCount);
                     sb.Append(procLine.PadRight(frameWidth) + "\n");
@@ -390,24 +424,33 @@ namespace OmniAdmin {
 
                 // --- DRAW VIEWPORT PAGE CONTENT ---
                 if (activeMode == "SpeedTest") {
+                    // Track lines drawn so we can pad exactly to fill (never overflow) the terminal.
+                    // headerHeight already accounts for the stats section.
+                    // Footer always takes 2 lines (separator + footer bar).
+                    // So the speed test body can use at most: height - headerHeight - 2 lines.
+                    int stBodyBudget = height - headerHeight - 2;
+                    int stLinesDrawn = 0;
+
+                    void AppendST(string line) { sb.Append(line); stLinesDrawn++; }
+
                     // Render Speed Test Form & Gauge
-                    sb.Append("  NETWORK SPEED TEST CONFIGURATION & RESULTS".PadRight(frameWidth) + "\n");
-                    sb.Append(" ".PadRight(frameWidth) + "\n");
-                    sb.Append("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
-                    sb.Append("  SETTINGS".PadRight(frameWidth) + "\n");
+                    AppendST("  NETWORK SPEED TEST CONFIGURATION & RESULTS".PadRight(frameWidth) + "\n");
+                    AppendST(" ".PadRight(frameWidth) + "\n");
+                    AppendST("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
+                    AppendST("  SETTINGS".PadRight(frameWidth) + "\n");
 
                     // Row 0: Test Mode
-                    string modeDisp = isLocal ? "Local Internet (Cloudflare)" : (GetString(st["TestMode"]) == "Remote" ? "◄ Remote Internet (Cloudflare) ►" : "◄ Peer-to-Peer (P2P LAN) ►");
+                    string modeDisp = isLocal ? "Local Internet (Cloudflare)" : (GetString(st["TestMode"]) == "Remote" ? "< Remote Internet (Cloudflare) >" : "< Peer-to-Peer (P2P LAN) >");
                     string row0 = "    [1] Test Mode:   " + modeDisp;
-                    sb.Append(speedTestRowIndex == 0 ? string.Format("\x1b[30;47m{0}\x1b[0m", row0.PadRight(frameWidth)) + "\n" : (row0.PadRight(frameWidth) + "\n"));
+                    AppendST(speedTestRowIndex == 0 ? string.Format("\x1b[30;47m{0}\x1b[0m", row0.PadRight(frameWidth)) + "\n" : (row0.PadRight(frameWidth) + "\n"));
 
                     // Row 1: Threads
                     string row1 = "    [2] Threads:     " + st["Threads"] + " (concurrent streams)";
-                    sb.Append(speedTestRowIndex == 1 ? string.Format("\x1b[30;47m{0}\x1b[0m", row1.PadRight(frameWidth)) + "\n" : (row1.PadRight(frameWidth) + "\n"));
+                    AppendST(speedTestRowIndex == 1 ? string.Format("\x1b[30;47m{0}\x1b[0m", row1.PadRight(frameWidth)) + "\n" : (row1.PadRight(frameWidth) + "\n"));
 
                     // Row 2: Timeout
                     string row2 = "    [3] Timeout:     " + st["TimeoutSeconds"] + " seconds per phase";
-                    sb.Append(speedTestRowIndex == 2 ? string.Format("\x1b[30;47m{0}\x1b[0m", row2.PadRight(frameWidth)) + "\n" : (row2.PadRight(frameWidth) + "\n"));
+                    AppendST(speedTestRowIndex == 2 ? string.Format("\x1b[30;47m{0}\x1b[0m", row2.PadRight(frameWidth)) + "\n" : (row2.PadRight(frameWidth) + "\n"));
 
                     int startButtonRow = 3;
                     if (!isLocal) {
@@ -415,21 +458,21 @@ namespace OmniAdmin {
                         string portDisp = GetString(st["TestMode"]) == "P2P" ? (GetString(st["Port"]) == "" ? "5201" : GetString(st["Port"])) : "N/A (Only for P2P Mode)";
                         string row3 = "    [4] P2P Port:    " + portDisp;
                         string fgColor = GetString(st["TestMode"]) == "P2P" ? "" : "\x1b[90m";
-                        sb.Append(speedTestRowIndex == 3 ? string.Format("\x1b[30;47m{0}\x1b[0m", row3.PadRight(frameWidth)) + "\n" : (fgColor + row3.PadRight(frameWidth) + "\x1b[0m\n"));
-                        sb.Append(" ".PadRight(frameWidth) + "\n");
+                        AppendST(speedTestRowIndex == 3 ? string.Format("\x1b[30;47m{0}\x1b[0m", row3.PadRight(frameWidth)) + "\n" : (fgColor + row3.PadRight(frameWidth) + "\x1b[0m\n"));
+                        AppendST(" ".PadRight(frameWidth) + "\n");
                         startButtonRow = 4;
                     }
 
                     // Start Button Row
                     string btn = "                     [   S T A R T   T E S T   ]";
-                    sb.Append(speedTestRowIndex == startButtonRow ? string.Format("\x1b[30;47m{0}\x1b[0m", btn.PadRight(frameWidth)) + "\n" : (btn.PadRight(frameWidth) + "\n"));
-                    sb.Append(" ".PadRight(frameWidth) + "\n");
-                    sb.Append("  STATUS & RESULTS".PadRight(frameWidth) + "\n");
+                    AppendST(speedTestRowIndex == startButtonRow ? string.Format("\x1b[30;47m{0}\x1b[0m", btn.PadRight(frameWidth)) + "\n" : (btn.PadRight(frameWidth) + "\n"));
+                    AppendST(" ".PadRight(frameWidth) + "\n");
+                    AppendST("  STATUS & RESULTS".PadRight(frameWidth) + "\n");
 
                     // Status / Phase
                     string phaseDisp = "Idle";
                     string phaseColor = "\x1b[90m";
-                    if (Convert.ToBoolean(st["Running"])) {
+                    if (ToBool(st["Running"])) {
                         phaseColor = "\x1b[36m"; // Cyan
                         string activePhase = GetString(st["ActivePhase"]);
                         if (activePhase == "Latency") phaseDisp = "Testing Latency (Target: " + computerName + ")...";
@@ -440,24 +483,30 @@ namespace OmniAdmin {
                         if (activePhase == "Done") { phaseDisp = "Completed!"; phaseColor = "\x1b[32m"; }
                         else if (activePhase == "Error") {
                             var res = st["Results"] as IDictionary;
-                            phaseDisp = "Failed: " + res["Error"];
+                            // Truncate error to single line so it doesn't overflow the layout
+                            string errMsg = (res["Error"] != null) ? res["Error"].ToString() : "";
+                            int maxErrLen = frameWidth - 16;
+                            if (errMsg.Length > maxErrLen) errMsg = errMsg.Substring(0, maxErrLen) + "...";
+                            // Strip newlines so a multi-line error doesn't push the layout down
+                            errMsg = errMsg.Replace("\r", " ").Replace("\n", " ");
+                            phaseDisp = "Failed: " + errMsg;
                             phaseColor = "\x1b[31m";
                         }
                     }
                     string phaseText = "    Phase:    " + phaseDisp;
-                    sb.Append(phaseColor + phaseText.PadRight(frameWidth) + "\x1b[0m\n");
+                    AppendST(phaseColor + phaseText.PadRight(frameWidth) + "\x1b[0m\n");
 
                     // Progress Bar
-                    if (Convert.ToBoolean(st["Running"])) {
-                        double pct = Convert.ToDouble(st["ProgressPercent"] ?? 0);
+                    if (ToBool(st["Running"])) {
+                        double pct = ToNum(st["ProgressPercent"], 0);
                         int pChars = (int)Math.Round((pct / 100.0) * 25);
                         pChars = Math.Min(25, Math.Max(0, pChars));
-                        string pBar = new string('█', pChars) + new string('░', 25 - pChars);
+                        string pBar = new string('#', pChars) + new string('.', 25 - pChars);
                         string progText = string.Format("    Progress: [{0}] {1}%", pBar, (int)Math.Round(pct));
-                        sb.Append("\x1b[36m" + progText.PadRight(frameWidth) + "\x1b[0m\n");
+                        AppendST("\x1b[36m" + progText.PadRight(frameWidth) + "\x1b[0m\n");
                     } else {
                         string progText = "    Progress: --";
-                        sb.Append("\x1b[90m" + progText.PadRight(frameWidth) + "\x1b[0m\n");
+                        AppendST("\x1b[90m" + progText.PadRight(frameWidth) + "\x1b[0m\n");
                     }
 
                     // Dynamic P2P Labels and Padding Alignments
@@ -472,31 +521,30 @@ namespace OmniAdmin {
                     string latColor = "\x1b[90m";
                     if (results["Latency"] != null) { latVal = results["Latency"] + " ms"; latColor = "\x1b[32m"; }
                     string latText = labelLat.PadRight(maxL) + latVal;
-                    sb.Append(latColor + latText.PadRight(frameWidth) + "\x1b[0m\n");
+                    AppendST(latColor + latText.PadRight(frameWidth) + "\x1b[0m\n");
 
                     string dlVal = "-- Mbps";
                     string dlColor = "\x1b[90m";
                     if (results["Download"] != null) {
-                        double mbps = Convert.ToDouble(results["Download"]);
+                        double mbps = ToNum(results["Download"]);
                         dlVal = mbps >= 1000 ? (Math.Round(mbps / 1000.0, 2).ToString() + " Gbps") : (Math.Round(mbps, 2).ToString() + " Mbps");
                         dlColor = "\x1b[32m";
                     }
                     string dlText = labelDl.PadRight(maxL) + dlVal;
-                    sb.Append(dlColor + dlText.PadRight(frameWidth) + "\x1b[0m\n");
+                    AppendST(dlColor + dlText.PadRight(frameWidth) + "\x1b[0m\n");
 
                     string ulVal = "-- Mbps";
                     string ulColor = "\x1b[90m";
                     if (results["Upload"] != null) {
-                        double mbps = Convert.ToDouble(results["Upload"]);
+                        double mbps = ToNum(results["Upload"]);
                         ulVal = mbps >= 1000 ? (Math.Round(mbps / 1000.0, 2).ToString() + " Gbps") : (Math.Round(mbps, 2).ToString() + " Mbps");
                         ulColor = "\x1b[32m";
                     }
                     string ulText = labelUl.PadRight(maxL) + ulVal;
-                    sb.Append(ulColor + ulText.PadRight(frameWidth) + "\x1b[0m\n");
+                    AppendST(ulColor + ulText.PadRight(frameWidth) + "\x1b[0m\n");
 
-                    // Pad remaining lines to fit currentPageSize
-                    int linesDrawn = 14 + (isLocal ? 0 : 2);
-                    for (int x = linesDrawn; x < currentPageSize + 7; x++) {
+                    // Pad remaining lines exactly to fill available space — never overflow
+                    for (int x = stLinesDrawn; x < stBodyBudget; x++) {
                         sb.Append(" ".PadRight(frameWidth) + "\n");
                     }
                 } 
@@ -536,7 +584,7 @@ namespace OmniAdmin {
                                 string pName = GetString(item, "Name");
                                 if (pName.Length > colWidths[1]) pName = pName.Substring(0, colWidths[1]);
                                 double rawCpu = GetDouble(item, "PercentProcessorTime");
-                                int coreCount = Convert.ToInt32(syncHash["Cores"] ?? 1);
+                                int coreCount = ToInt(syncHash["Cores"], 1);
                                 double cpuVal = Math.Round(rawCpu / coreCount, 1);
                                 if (cpuVal > 100) cpuVal = 100.0;
                                 if (cpuVal < 0) cpuVal = 0.0;
@@ -681,7 +729,7 @@ namespace OmniAdmin {
 
                 string footerBg = "\x1b[40m"; // Black background
                 string footerFg = "\x1b[36m"; // Cyan text
-                if (activeMode == "SpeedTest" && Convert.ToBoolean(st["Running"])) {
+                if (activeMode == "SpeedTest" && ToBool(st["Running"])) {
                     footerText = " Testing in progress... Please do not close or resize the terminal. ";
                     footerFg = "\x1b[33m"; // Yellow
                 }
@@ -883,7 +931,7 @@ namespace OmniAdmin {
                     }
                     // --- INPUT HANDLING: SPEED TEST MODE ---
                     else if (activeMode == "SpeedTest") {
-                        if (Convert.ToBoolean(st["Running"])) {
+                        if (ToBool(st["Running"])) {
                             Thread.Sleep(50);
                             continue;
                         }
@@ -902,17 +950,17 @@ namespace OmniAdmin {
                                 st["TestMode"] = currentMode;
                             }
                             else if (speedTestRowIndex == 1) {
-                                int thr = Convert.ToInt32(st["Threads"] ?? 8);
+                                int thr = ToInt(st["Threads"], 8);
                                 if (key == ConsoleKey.LeftArrow && thr > 1) st["Threads"] = thr - 1;
                                 else if (key == ConsoleKey.RightArrow && thr < 64) st["Threads"] = thr + 1;
                             }
                             else if (speedTestRowIndex == 2) {
-                                int timeout = Convert.ToInt32(st["TimeoutSeconds"] ?? 15);
+                                int timeout = ToInt(st["TimeoutSeconds"], 15);
                                 if (key == ConsoleKey.LeftArrow && timeout > 5) st["TimeoutSeconds"] = timeout - 1;
                                 else if (key == ConsoleKey.RightArrow && timeout < 120) st["TimeoutSeconds"] = timeout + 1;
                             }
                             else if (speedTestRowIndex == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
-                                int port = Convert.ToInt32(st["Port"] ?? 5201);
+                                int port = ToInt(st["Port"], 5201);
                                 if (key == ConsoleKey.LeftArrow && port > 1024) st["Port"] = port - 1;
                                 else if (key == ConsoleKey.RightArrow && port < 65535) st["Port"] = port + 1;
                             }
@@ -927,7 +975,7 @@ namespace OmniAdmin {
                                     st["Threads"] = result;
                                 }
                                 Console.CursorVisible = false;
-                                Console.Clear();
+                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
                             }
                             else if (speedTestRowIndex == 2) {
                                 Console.CursorVisible = true;
@@ -937,7 +985,7 @@ namespace OmniAdmin {
                                     st["TimeoutSeconds"] = result;
                                 }
                                 Console.CursorVisible = false;
-                                Console.Clear();
+                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
                             }
                             else if (speedTestRowIndex == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
                                 Console.CursorVisible = true;
@@ -947,7 +995,7 @@ namespace OmniAdmin {
                                     st["Port"] = result;
                                 }
                                 Console.CursorVisible = false;
-                                Console.Clear();
+                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
                             }
                             else if (speedTestRowIndex == startBtnIdx) {
                                 st["Running"] = true;
@@ -984,7 +1032,7 @@ namespace OmniAdmin {
                             pageIndex = 0;
                             selectedRow = 0;
                             Console.CursorVisible = false;
-                            Console.Clear();
+                            Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
                         }
                         else if (key == ConsoleKey.UpArrow) {
                             if (selectedRow > 0) selectedRow--;
@@ -1006,7 +1054,7 @@ namespace OmniAdmin {
                                 showTaskProps = true;
                             }
                             else if (activeMode == "Processes") {
-                                Console.Clear();
+                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
                                 paused = !paused;
                                 selectedRow = 0; pageIndex = 0;
                                 selColIndex = 2; isDesc = true;
@@ -1091,35 +1139,35 @@ namespace OmniAdmin {
         }
         
         public static List<object> GetProcessList(Hashtable syncHash) {
-            var raw = syncHash["RawProcessList"] as IEnumerable;
+            var raw = Unwrap(syncHash["RawProcessList"]) as IEnumerable;
             if (raw == null) return new List<object>();
             var list = new List<object>();
             foreach (var item in raw) list.Add(item);
             return list;
         }
         public static List<object> GetServiceList(Hashtable syncHash) {
-            var raw = syncHash["ServiceData"] as IEnumerable;
+            var raw = Unwrap(syncHash["ServiceData"]) as IEnumerable;
             if (raw == null) return new List<object>();
             var list = new List<object>();
             foreach (var item in raw) list.Add(item);
             return list;
         }
         public static List<object> GetTaskList(Hashtable syncHash) {
-            var raw = syncHash["TaskData"] as IEnumerable;
+            var raw = Unwrap(syncHash["TaskData"]) as IEnumerable;
             if (raw == null) return new List<object>();
             var list = new List<object>();
             foreach (var item in raw) list.Add(item);
             return list;
         }
         public static List<object> GetAppList(Hashtable syncHash) {
-            var raw = syncHash["AppData"] as IEnumerable;
+            var raw = Unwrap(syncHash["AppData"]) as IEnumerable;
             if (raw == null) return new List<object>();
             var list = new List<object>();
             foreach (var item in raw) list.Add(item);
             return list;
         }
         public static List<object> GetUserList(Hashtable syncHash) {
-            var raw = syncHash["UserData"] as IEnumerable;
+            var raw = Unwrap(syncHash["UserData"]) as IEnumerable;
             if (raw == null) return new List<object>();
             var list = new List<object>();
             foreach (var item in raw) list.Add(item);

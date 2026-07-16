@@ -77,7 +77,7 @@
     #region MAIN DATA LOOP
     $CachedGpuLoad = 0
     $GpuCycleCount = 0
-    $IsFirstCycle = $true
+    $CycleCount = 0
     while ($Sync.Running) {
         $CycleStart = [DateTime]::UtcNow
         try {
@@ -137,10 +137,12 @@
             $DoGpu = ($GpuCycleCount -ge 5)
             if ($DoGpu) { $GpuCycleCount = 0 }
             
-            $ArgsArray = @([bool]$FetchUsers, [bool]$Sync.ServiceModeActive, [bool]$Sync.TaskModeActive, [bool]$DoGpu, [bool]$FetchApps)
+            # Pass logical core count so the Run-Script block can normalize per-core CPU %
+            $CoreCount = if ($Sync.StaticData -and $Sync.StaticData.Cores -gt 0) { [int]$Sync.StaticData.Cores } else { 1 }
+            $ArgsArray = @([bool]$FetchUsers, [bool]$Sync.ServiceModeActive, [bool]$Sync.TaskModeActive, [bool]$DoGpu, [bool]$FetchApps, [int]$CoreCount, [bool]($CycleCount -eq 0))
 
             $Result = Run-Script -Script {
-                param($DoUsers, $DoServices, $DoTasks, $DoGpu, $DoApps)
+                param($DoUsers, $DoServices, $DoTasks, $DoGpu, $DoApps, $CoreCount, $IsFirstCycle)
                 
                 $DebugStr = ""
 
@@ -171,12 +173,19 @@
                     } catch {}
                 }
 
-                # V71: Cast Processor Time to double in case of WMI Overflow spikes
+                # Normalize per-core CPU% to 0-100% range.
+                # Win32_PerfFormattedData_PerfProc_Process reports PercentProcessorTime
+                # as (usage * LogicalCores), so divide by core count to get true %.
                 $Procs = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue | 
                     Where-Object { $_.Name -ne "Idle" -and $_.Name -ne "_Total" } |
                     ForEach-Object {
-                        $CpuVal = [double]$_.PercentProcessorTime
-                        if ($IsFirstCycle) { $CpuVal = 0.0 }
+                        # Divide by core count and cap at 100.0
+                        $CpuVal = 0.0
+                        if (-not $IsFirstCycle) {
+                            $CpuVal = [math]::Round([double]$_.PercentProcessorTime / $CoreCount, 1)
+                            if ($CpuVal -gt 100.0) { $CpuVal = 100.0 }
+                            if ($CpuVal -lt 0.0) { $CpuVal = 0.0 }
+                        }
                         [PSCustomObject]@{
                             Name = [string]$_.Name
                             IDProcess = [int]$_.IDProcess
@@ -372,7 +381,7 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
             if ($Result.DebugStr) { $Sync.DebugLog = $Result.DebugStr }
             
             $Sync.LastUpdate = Get-Date
-            $IsFirstCycle = $false
+            $CycleCount++
         }
         catch { $Sync.DebugLog = "CRASH: $($_.Exception.Message)" }
         # Dynamic sleep: target 1-second total cycle time, accounting for query duration
