@@ -1,4 +1,4 @@
-function Get-DisplayWidth {
+﻿function Get-DisplayWidth {
     param([string]$s)
     if (-not $s) { return 0 }
     $width = 0

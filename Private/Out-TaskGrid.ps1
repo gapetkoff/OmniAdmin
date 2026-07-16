@@ -1,4 +1,4 @@
-function Out-TaskGrid {
+﻿function Out-TaskGrid {
     param(
         [array]$Tasks,
         [Parameter(Mandatory=$true)][int]$SelectedRow,

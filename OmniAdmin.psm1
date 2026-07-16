@@ -1,4 +1,4 @@
-# OmniAdmin.psm1
+﻿# OmniAdmin.psm1
 
 $publicDir  = Join-Path -Path $PSScriptRoot -ChildPath 'Public'
 $privateDir = Join-Path -Path $PSScriptRoot -ChildPath 'Private'

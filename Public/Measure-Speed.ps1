@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Performs a high-performance network speed test (Latency, Download, Upload) using native C# sockets.
 

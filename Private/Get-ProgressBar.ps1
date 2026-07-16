@@ -1,4 +1,4 @@
-function Get-ProgressBar {
+﻿function Get-ProgressBar {
     param([int]$Percent, [int]$Width = 20)
     # Cap limits for drawing safety
     if ($Percent -gt 100) { $Percent = 100 }

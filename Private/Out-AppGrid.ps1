@@ -1,4 +1,4 @@
-function Out-AppGrid {
+﻿function Out-AppGrid {
     param(
         [array]$Apps,
         [Parameter(Mandatory=$true)][int]$SelectedRow,

@@ -1,4 +1,4 @@
-function Invoke-SystemMonitorWorker {
+﻿function Invoke-SystemMonitorWorker {
     param($Sync)
     
     $Session = $null
@@ -77,6 +77,7 @@ function Invoke-SystemMonitorWorker {
     #region MAIN DATA LOOP
     $CachedGpuLoad = 0
     $GpuCycleCount = 0
+    $IsFirstCycle = $true
     while ($Sync.Running) {
         $CycleStart = [DateTime]::UtcNow
         try {
@@ -174,10 +175,12 @@ function Invoke-SystemMonitorWorker {
                 $Procs = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue | 
                     Where-Object { $_.Name -ne "Idle" -and $_.Name -ne "_Total" } |
                     ForEach-Object {
+                        $CpuVal = [double]$_.PercentProcessorTime
+                        if ($IsFirstCycle) { $CpuVal = 0.0 }
                         [PSCustomObject]@{
                             Name = [string]$_.Name
                             IDProcess = [int]$_.IDProcess
-                            PercentProcessorTime = [double]$_.PercentProcessorTime
+                            PercentProcessorTime = $CpuVal
                             WorkingSet = [long]$_.WorkingSet
                             ThreadCount = [int]$_.ThreadCount
                             HandleCount = [int]$_.HandleCount
@@ -369,6 +372,7 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
             if ($Result.DebugStr) { $Sync.DebugLog = $Result.DebugStr }
             
             $Sync.LastUpdate = Get-Date
+            $IsFirstCycle = $false
         }
         catch { $Sync.DebugLog = "CRASH: $($_.Exception.Message)" }
         # Dynamic sleep: target 1-second total cycle time, accounting for query duration

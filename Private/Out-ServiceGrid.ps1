@@ -1,4 +1,4 @@
-function Out-ServiceGrid {
+﻿function Out-ServiceGrid {
     param(
         [array]$Services,
         [Parameter(Mandatory=$true)][int]$SelectedRow,

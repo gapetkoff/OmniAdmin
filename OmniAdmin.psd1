@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule = 'OmniAdmin.psm1'
     ModuleVersion = '1.0.0'
     CompatiblePSEditions = 'Desktop', 'Core'

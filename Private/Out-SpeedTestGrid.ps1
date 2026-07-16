@@ -1,4 +1,4 @@
-# Format helpers
+﻿# Format helpers
 function Get-ProgressGauge {
     param([double]$Percent)
     $Width = 25

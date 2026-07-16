@@ -1,4 +1,4 @@
-function Out-UserGrid {
+﻿function Out-UserGrid {
     param(
         [array]$Users,
         [Parameter(Mandatory=$true)][int]$SelectedRow,

@@ -1,4 +1,4 @@
-function Out-ProcessGrid {
+﻿function Out-ProcessGrid {
     param(
         [array]$ProcessList,
         [Parameter(Mandatory=$true)][int]$SelectedRow,

@@ -1,4 +1,4 @@
-function Pad-String {
+﻿function Pad-String {
     param([string]$s, [int]$width, [string]$paddingChar = " ")
     $currentWidth = Get-DisplayWidth $s
     if ($currentWidth -ge $width) {

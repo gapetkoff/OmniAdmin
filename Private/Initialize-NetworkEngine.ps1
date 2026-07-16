@@ -1,4 +1,4 @@
-function Initialize-NetworkEngine {
+﻿function Initialize-NetworkEngine {
     # Optimization: Unlock Connection Limit for PowerShell 5.1 (Legacy .NET)
     # Necessary to support >2 concurrent streams on older OS/PS versions.
     [System.Net.ServicePointManager]::DefaultConnectionLimit = 1000

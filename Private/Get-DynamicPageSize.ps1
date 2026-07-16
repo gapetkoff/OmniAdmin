@@ -1,4 +1,4 @@
-function Get-DynamicPageSize {
+﻿function Get-DynamicPageSize {
     param(
         [Parameter(Mandatory=$true)][int]$HeaderHeight,
         [Parameter(Mandatory=$true)][bool]$UseFixedPageSize,
