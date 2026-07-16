@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     A high-performance, asynchronous TUI System Monitor and Task Manager.
 
@@ -55,8 +55,52 @@ function Start-SystemMonitor {
         Start-Sleep -Seconds 1
     }
     #endregion
+    #region 0b. REMOTE HOST REACHABILITY PRE-CHECK
+    $IsLocal = ($ComputerName -eq "localhost" -or $ComputerName -eq "." -or $ComputerName -eq $env:COMPUTERNAME)
+    if (-not $IsLocal) {
+        Write-Host ""
+        Write-Host " Checking reachability of '$ComputerName'..." -ForegroundColor DarkGray
+        
+        # First try a fast TCP connect to WinRM port 5985 (2 second timeout)
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $connected = $false
+        try {
+            $connectResult = $tcpClient.BeginConnect($ComputerName, 5985, $null, $null)
+            $connected = $connectResult.AsyncWaitHandle.WaitOne(2000, $false)
+            if ($connected -and $tcpClient.Connected) {
+                $tcpClient.EndConnect($connectResult)
+            } else {
+                $connected = $false
+            }
+        } catch { $connected = $false }
+        finally { $tcpClient.Dispose() }
 
-    #region 1. SHARED MEMORY
+        if (-not $connected) {
+            # TCP failed — try ICMP ping to distinguish host-down from WinRM-not-configured
+            $pingReachable = $false
+            try {
+                $ping = New-Object System.Net.NetworkInformation.Ping
+                $pingResult = $ping.Send($ComputerName, 1500)
+                $pingReachable = ($pingResult.Status -eq [System.Net.NetworkInformation.IPStatus]::Success)
+            } catch { $pingReachable = $false }
+
+            Write-Host ""
+            if ($pingReachable) {
+                Write-Host " HOST REACHABLE but WinRM is not responding on port 5985." -ForegroundColor Yellow
+                Write-Host " Ensure WinRM is enabled on '$ComputerName':" -ForegroundColor Yellow
+                Write-Host "   Enable-PSRemoting -Force   (run on the remote machine)" -ForegroundColor DarkGray
+            } else {
+                Write-Host " HOST UNREACHABLE: '$ComputerName' did not respond." -ForegroundColor Red
+                Write-Host " Verify the hostname/IP is correct and the machine is online." -ForegroundColor DarkGray
+            }
+            Write-Host ""
+            return
+        }
+
+        Write-Host " Host reachable. Connecting..." -ForegroundColor DarkGray
+    }
+    #endregion
+
     $SyncHash = [hashtable]::Synchronized(@{
         TargetComputer    = $ComputerName
         Credential        = $Credential
@@ -82,7 +126,11 @@ function Start-SystemMonitor {
         LastUpdate        = [DateTime]::MinValue
         # Status
         Error             = $null
-        CriticalError     = $false       
+        CriticalError     = $false
+        Disconnected      = $false
+        ReconnectAttempt  = 0
+        ReconnectMessage  = ""
+        DisconnectTime    = [DateTime]::MinValue
         ActionStatus      = ""
         DebugLog          = "Init..."
         SpeedTest         = [hashtable]::Synchronized(@{
@@ -111,7 +159,6 @@ function Start-SystemMonitor {
     Clear-Host
 
     $UILoaded = $false
-    $IsLocal = ($ComputerName -eq "localhost" -or $ComputerName -eq "." -or $ComputerName -eq $env:COMPUTERNAME)
     $SyncHash.SpeedTest.TestMode = if ($IsLocal) { "Local" } else { "Remote" }
 
     # Initial Wait
@@ -131,6 +178,14 @@ function Start-SystemMonitor {
                 Write-Host " ⏳ $($SyncHash.Error)".PadRight($LoadWidth) -ForegroundColor Cyan
             }
             Start-Sleep -Milliseconds 100
+        }
+        if ($SyncHash.CriticalError) {
+            Clear-Host
+            Write-Host ""
+            Write-Host " CONNECTION FAILED" -ForegroundColor Red
+            Write-Host " $($SyncHash.Error)" -ForegroundColor Yellow
+            Write-Host ""
+            return
         }
         Clear-Host
     #endregion

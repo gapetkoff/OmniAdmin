@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 using System.Collections;
 using System.Collections.Generic;
@@ -179,6 +179,103 @@ namespace OmniAdmin {
                     Console.Clear();
                     lastWidth = width;
                     lastHeight = height;
+                }
+
+                // --- MID-SESSION DISCONNECT OVERLAY ---
+                // Worker sets Disconnected=true and enters a reconnect loop while keeping Running=true.
+                // We render a live overlay here (non-blocking) so the clock keeps ticking and
+                // the user can press [Q] to quit via the normal key handler at the bottom of the loop.
+                if (ToBool(syncHash["Disconnected"])) {
+                    var sb2 = new StringBuilder();
+                    sb2.Append("\x1b[H\x1b[0m");
+                    int cw2 = width - 1;
+                    string dBorder = new string('═', cw2);
+
+                    // Header
+                    sb2.Append("\x1b[31m" + dBorder + "\x1b[0m\n");
+                    sb2.Append("\x1b[31m  ⚠  CONNECTION LOST\x1b[0m".PadRight(cw2 + 10) + "\n");
+                    sb2.Append("\x1b[31m" + dBorder + "\x1b[0m\n");
+                    sb2.Append("\n");
+
+                    // Elapsed time
+                    object disconnectTimeObj = Unwrap(syncHash["DisconnectTime"]);
+                    string elapsedStr = "";
+                    if (disconnectTimeObj is DateTime) {
+                        var elapsed = DateTime.UtcNow - (DateTime)disconnectTimeObj;
+                        elapsedStr = string.Format("{0}m {1}s", (int)elapsed.TotalMinutes, elapsed.Seconds);
+                    }
+
+                    // Spinner
+                    string[] spinFrames = new string[] { "|", "/", "-", "\\" };
+                    string spin = spinFrames[(int)(DateTime.UtcNow.Ticks / 2000000 % 4)];
+
+                    int attempt = ToInt(syncHash["ReconnectAttempt"]);
+                    string reconMsg = GetString(Unwrap(syncHash["ReconnectMessage"]));
+                    // Word-wrap reconnect message
+                    int mw = cw2 - 4;
+                    string rem = reconMsg;
+                    while (rem.Length > mw) {
+                        int sp = rem.LastIndexOf(' ', mw); if (sp <= 0) sp = mw;
+                        sb2.Append("\x1b[33m  " + rem.Substring(0, sp) + "\x1b[0m\n");
+                        rem = rem.Substring(sp).TrimStart();
+                    }
+                    if (rem.Length > 0) sb2.Append("\x1b[33m  " + rem + "\x1b[0m\n");
+                    sb2.Append("\n");
+
+                    sb2.Append(string.Format("\x1b[36m  {0} Elapsed: {1}   Attempt: {2}\x1b[0m\n", spin, elapsedStr, attempt));
+                    sb2.Append("\n");
+                    sb2.Append("\x1b[90m" + new string('─', cw2) + "\x1b[0m\n");
+                    sb2.Append("\x1b[32m  Waiting for host to come back online...\x1b[0m\n");
+                    sb2.Append("\n");
+                    sb2.Append("\x1b[40m\x1b[31m  [Q] Quit \x1b[0m\n");
+
+                    // Pad remaining lines
+                    int linesWritten = 13;
+                    for (int pad = linesWritten; pad < height - 1; pad++) sb2.Append(" ".PadRight(cw2) + "\n");
+
+                    Console.Write(sb2.ToString());
+
+                    // Handle [Q] non-blocking
+                    if (Console.KeyAvailable) {
+                        var ki = Console.ReadKey(true);
+                        if (ki.Key == ConsoleKey.Q) {
+                            syncHash["Running"] = false;
+                        }
+                    }
+                    Thread.Sleep(250); // refresh 4x/sec while waiting
+                    continue;
+                }
+
+                // --- STARTUP CRITICAL ERROR (initial connect failed, raised by worker before TUI painted) ---
+                if (ToBool(syncHash["CriticalError"])) {
+                    string lostErr = GetString(syncHash["Error"]);
+                    Console.Clear();
+                    Console.CursorVisible = false;
+                    int cw = Console.WindowWidth;
+                    string border = new string('═', Math.Max(0, cw - 1));
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine(border);
+                    Console.WriteLine("  CONNECTION FAILED".PadRight(cw - 1));
+                    Console.WriteLine(border);
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    int maxW = cw - 4;
+                    string remaining = lostErr;
+                    while (remaining.Length > maxW) {
+                        int split = remaining.LastIndexOf(' ', maxW);
+                        if (split <= 0) split = maxW;
+                        Console.WriteLine("  " + remaining.Substring(0, split));
+                        remaining = remaining.Substring(split).TrimStart();
+                    }
+                    if (remaining.Length > 0) Console.WriteLine("  " + remaining);
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine("  Press any key to exit...");
+                    Console.ResetColor();
+                    try { Console.ReadKey(true); } catch {}
+                    break;
                 }
 
                 if (width < 95 || height < 20) {

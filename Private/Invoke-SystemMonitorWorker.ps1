@@ -1,4 +1,4 @@
-﻿function Invoke-SystemMonitorWorker {
+function Invoke-SystemMonitorWorker {
     param($Sync)
     
     $Session = $null
@@ -78,6 +78,8 @@
     $CachedGpuLoad = 0
     $GpuCycleCount = 0
     $CycleCount = 0
+    $ConsecutiveErrors = 0
+    $MaxConsecutiveErrors = 3
     while ($Sync.Running) {
         $CycleStart = [DateTime]::UtcNow
         try {
@@ -382,8 +384,87 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
             
             $Sync.LastUpdate = Get-Date
             $CycleCount++
+            $ConsecutiveErrors = 0  # reset on successful cycle
         }
-        catch { $Sync.DebugLog = "CRASH: $($_.Exception.Message)" }
+        catch {
+            $ConsecutiveErrors++
+            $errMsg = $_.Exception.Message
+
+            # Check if PSSession is definitively broken
+            $sessionLost = $false
+            if (-not $IsLocal -and $Session) {
+                if ($Session.State -ne [System.Management.Automation.Runspaces.RunspaceState]::Opened) {
+                    $sessionLost = $true
+                }
+            }
+
+            $shouldReconnect = $sessionLost -or ($ConsecutiveErrors -ge $MaxConsecutiveErrors)
+
+            if (-not $IsLocal -and $shouldReconnect) {
+                # --- RECONNECT LOOP ---
+                # Signal the TUI to show the reconnect overlay, but keep Running=true
+                # so the TUI stays alive and the user can choose to wait or quit.
+                try { if ($Session) { Remove-PSSession $Session -ErrorAction SilentlyContinue } } catch {}
+                $Session = $null
+                $ConsecutiveErrors = 0
+
+                $Sync.Disconnected      = $true
+                $Sync.DisconnectTime    = [DateTime]::UtcNow
+                $Sync.ReconnectAttempt  = 0
+                $Sync.ReconnectMessage  = "Lost connection to '$($Sync.TargetComputer)': $errMsg"
+
+                $reconnected = $false
+                while ($Sync.Running -and -not $reconnected) {
+                    $Sync.ReconnectAttempt++
+                    $Sync.ReconnectMessage = "Attempting to reconnect to '$($Sync.TargetComputer)'... (attempt $($Sync.ReconnectAttempt))"
+                    try {
+                        $SessParams = @{
+                            ComputerName  = $Sync.TargetComputer
+                            ErrorAction   = 'Stop'
+                            SessionOption = (New-PSSessionOption -OperationTimeout 5000)
+                        }
+                        if ($Sync.Credential) { $SessParams['Credential'] = $Sync.Credential }
+                        $Session = New-PSSession @SessParams
+                        # Re-fetch static data on the new session
+                        $Sync.StaticData = Invoke-Command -Session $Session -ScriptBlock {
+                            $CPU = Get-CimInstance Win32_Processor
+                            $OS  = Get-CimInstance Win32_OperatingSystem
+                            $CS  = Get-CimInstance Win32_ComputerSystem
+                            $GpuName = $null
+                            try { $Vid = Get-CimInstance Win32_VideoController -EA SilentlyContinue | Select -First 1; if ($Vid) { $GpuName = $Vid.Name } } catch {}
+                            [PSCustomObject]@{
+                                CpuName  = $CPU.Name -replace '\s+', ' ' -replace '\(R\)', '' -replace '\(TM\)', ''
+                                GpuName  = $GpuName
+                                Cores    = $CS.NumberOfLogicalProcessors
+                                TotalRam = [math]::Round($OS.TotalVisibleMemorySize / 1024 / 1024, 1)
+                                BootTime = $OS.LastBootUpTime
+                            }
+                        }
+                        # Connection restored — clear the disconnected state and resume
+                        $Sync.Disconnected     = $false
+                        $Sync.ReconnectAttempt = 0
+                        $Sync.ReconnectMessage = ""
+                        $reconnected = $true
+                    }
+                    catch {
+                        # Reconnect failed — wait 5 seconds then retry (if user hasn't quit)
+                        $Sync.ReconnectMessage = "Attempt $($Sync.ReconnectAttempt) failed. Retrying in 5s... ($($_.Exception.Message))"
+                        $waitEnd = [DateTime]::UtcNow.AddSeconds(5)
+                        while ([DateTime]::UtcNow -lt $waitEnd -and $Sync.Running) {
+                            Start-Sleep -Milliseconds 250
+                        }
+                    }
+                }
+
+                # If user pressed Q while we were reconnecting, exit cleanly
+                if (-not $Sync.Running) { break }
+                # Otherwise we reconnected — fall through to continue the main loop
+            }
+            else {
+                # Local error or minor transient — log and retry next cycle
+                $Sync.DebugLog = "ERR ($ConsecutiveErrors/$MaxConsecutiveErrors): $errMsg"
+            }
+        }
         # Dynamic sleep: target 1-second total cycle time, accounting for query duration
         $Elapsed = ([DateTime]::UtcNow - $CycleStart).TotalMilliseconds
         $SleepMs = [math]::Max(100, 1000 - $Elapsed)
