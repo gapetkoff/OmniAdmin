@@ -8,8 +8,13 @@
         [Parameter(Mandatory=$true)][int]$SelColIndex,
         [Parameter(Mandatory=$true)][bool]$IsDesc,
         [Parameter(Mandatory=$true)][bool]$Paused,
-        [Parameter(Mandatory=$true)][int]$Cores
+        [Parameter(Mandatory=$true)][int]$Cores,
+        [Parameter(Mandatory=$false)][hashtable]$ServiceHostMap = @{}
     )
+
+    if (-not $PSBoundParameters.ContainsKey('ServiceHostMap') -and $Sync -and $Sync.ServiceHostMap) {
+        $ServiceHostMap = $Sync.ServiceHostMap
+    }
 
     $ColHeaders = @("PID", "Name", "CPU(%)", "RAM(MB)", "Threads", "Handles")
     $RealProps  = @("IDProcess", "Name", "PercentProcessorTime", "WorkingSet", "ThreadCount", "HandleCount")
@@ -49,6 +54,16 @@
                 $p = $CurrentListArray[$i]
                 
                 $NameVal = if ($p.Name) { $p.Name -replace '#\d+$','' } else { "Unknown" }
+                if ($NameVal -like "svchost*") {
+                    $SvcPid = [int]$p.IDProcess
+                    if ($ServiceHostMap -and $ServiceHostMap.ContainsKey($SvcPid)) {
+                        $Services = $ServiceHostMap[$SvcPid]
+                        if ($Services) {
+                            $ServiceNames = if ($Services -is [string]) { $Services } else { $Services -join ", " }
+                            $NameVal = "$NameVal ($ServiceNames)"
+                        }
+                    }
+                }
                 if ($NameVal.Length -gt $NameW) { $NameVal = $NameVal.SubString(0, $NameW) }
                 
                 $RawCpu = if ($p.PercentProcessorTime) { $p.PercentProcessorTime } else { 0 }

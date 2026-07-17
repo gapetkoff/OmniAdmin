@@ -158,12 +158,19 @@ namespace OmniAdmin {
             int menuSelectedIndex = 0;
             bool showServiceProps = false;
             bool showTaskProps = false;
+            bool showHistoryDetail = false;
             List<object> frozenProcessList = null;
             int speedTestRowIndex = 0;
             
             // Runspaces references
             PowerShell speedTestPS = null;
             IAsyncResult speedTestAsyncHandle = null;
+            PowerShell historyPS = null;
+            IAsyncResult historyAsyncHandle = null;
+            bool loadingHistory = false;
+            List<object> historyList = null;
+            int historyDays = 1;          // number of days to fetch
+            bool historyConfigured = false; // true once user has chosen timeframe and started fetch
 
             Console.CursorVisible = false;
             Console.Clear();
@@ -294,6 +301,30 @@ namespace OmniAdmin {
                     speedTestAsyncHandle = null;
                 }
 
+                // Check history runspace completion
+                if (historyPS != null && historyAsyncHandle != null && historyAsyncHandle.IsCompleted) {
+                    try {
+                        var results = historyPS.EndInvoke(historyAsyncHandle);
+                        historyList = new List<object>();
+                        if (results != null) {
+                            foreach (var item in results) {
+                                historyList.Add(item);
+                            }
+                        }
+                        syncHash["HistoryData"] = historyList;
+                        syncHash["ActionStatus"] = "Loaded " + historyList.Count + " history entries.";
+                    }
+                    catch (Exception ex) {
+                        syncHash["ActionStatus"] = "Error loading history: " + ex.Message;
+                    }
+                    finally {
+                        try { historyPS.Dispose(); } catch {}
+                        historyPS = null;
+                        historyAsyncHandle = null;
+                        loadingHistory = false;
+                    }
+                }
+
                 // Smooth speed test progress calculation
                 var st = syncHash["SpeedTest"] as IDictionary;
                 if (st != null && ToBool(st["Running"])) {
@@ -314,6 +345,40 @@ namespace OmniAdmin {
                 syncHash["ServiceModeActive"] = (activeMode == "Services" && !showServiceProps);
                 syncHash["TaskModeActive"] = (activeMode == "Tasks" && !showTaskProps);
                 syncHash["AppModeActive"] = (activeMode == "Apps");
+                syncHash["HistoryModeActive"] = (activeMode == "History");
+
+                // Trigger history query asynchronously when entering History tab
+                if (activeMode == "History") {
+                    if (historyList == null && !loadingHistory && historyConfigured) {
+                        loadingHistory = true;
+                        syncHash["ActionStatus"] = "Loading Browser History...";
+                        historyList = new List<object>(); // Prevents double-triggering
+
+                        try {
+                            // Use GetString() to handle PSObject-wrapped strings from PowerShell hashtable
+                            string bhScript = GetString(syncHash["BrowserHistoryScript"]);
+                            string b64Path  = GetString(syncHash["SqliteB64Path"]);
+                            if (!string.IsNullOrEmpty(bhScript)) {
+                                historyPS = PowerShell.Create();
+                                string prefixScript = string.Format("$global:OAD_SqliteB64Path = '{0}';\n", b64Path.Replace("'", "''"));
+                                historyPS.AddScript(prefixScript + bhScript + string.Format("\nGet-BrowserHistory -ComputerName $args[0] -Credential $args[1] -AllUsers -Hours {0}", historyDays * 24));
+                                historyPS.AddArgument(computerName);
+                                historyPS.AddArgument(credential);
+                                historyAsyncHandle = historyPS.BeginInvoke();
+                            } else {
+                                string dbg = GetString(syncHash["DebugLog"]);
+                                if (string.IsNullOrEmpty(dbg)) dbg = "No path debug info available.";
+                                syncHash["ActionStatus"] = "Error: Script not loaded";
+                                syncHash["HistoryError"] = "BrowserHistoryScript failed to load into SyncHash.\n" + dbg;
+                                loadingHistory = false;
+                            }
+                        } catch (Exception ex) {
+                            syncHash["ActionStatus"] = "Error: " + ex.Message.Substring(0, Math.Min(60, ex.Message.Length));
+                            syncHash["HistoryError"] = "Exception starting history query: " + ex.Message;
+                            loadingHistory = false;
+                        }
+                    }
+                }
 
                 // Dynamic Header Height
                 int headerHeight = 10;
@@ -341,9 +406,9 @@ namespace OmniAdmin {
                 string[] colAligns = new string[0];
 
                 if (activeMode == "Processes") {
-                    colHeaders = new string[] { "PID", "Name", "CPU(%)", "RAM(MB)", "Threads", "Handles" };
+                    colHeaders = new string[] { "PID (1)", "Name (2)", "CPU(%) (3)", "RAM(MB) (4)", "Threads (5)", "Handles (6)" };
                     colProps = new string[] { "IDProcess", "Name", "PercentProcessorTime", "WorkingSet", "ThreadCount", "HandleCount" };
-                    colWidths = new int[] { 8, frameWidth - 58, 10, 10, 10, 10 };
+                    colWidths = new int[] { 9, frameWidth - 61, 11, 11, 11, 12 };
                     colAligns = new string[] { "-", "-", "", "", "", "" };
                     var raw = (paused ? frozenProcessList : GetProcessList(syncHash));
                     if (raw != null) {
@@ -354,11 +419,11 @@ namespace OmniAdmin {
                     }
                 }
                 else if (activeMode == "Services") {
-                    colHeaders = new string[] { "Status", "Name", "Display Name", "Type" };
+                    colHeaders = new string[] { "Status (1)", "Name (2)", "Display Name (3)", "Type (4)" };
                     colProps = new string[] { "Status", "Name", "DisplayName", "StartType" };
-                    int avail = Math.Max(10, frameWidth - 26);
+                    int avail = Math.Max(10, frameWidth - 27);
                     int nameW = avail / 2;
-                    colWidths = new int[] { 10, nameW, avail - nameW, 10 };
+                    colWidths = new int[] { 11, nameW, avail - nameW, 10 };
                     colAligns = new string[] { "-", "-", "-", "-" };
                     var raw = GetServiceList(syncHash);
                     if (raw != null) {
@@ -369,11 +434,11 @@ namespace OmniAdmin {
                     }
                 }
                 else if (activeMode == "Tasks") {
-                    colHeaders = new string[] { "State", "Task Name", "Last Run Time", "Result" };
+                    colHeaders = new string[] { "State (1)", "Task Name (2)", "Last Run Time (3)", "Result (4)" };
                     colProps = new string[] { "State", "TaskName", "LastRunTime", "LastTaskResult" };
-                    int avail = frameWidth - 26;
+                    int avail = frameWidth - 28;
                     int nameW = (int)Math.Floor(avail * 0.55);
-                    colWidths = new int[] { 10, nameW, avail - nameW, 10 };
+                    colWidths = new int[] { 11, nameW, avail - nameW, 11 };
                     colAligns = new string[] { "-", "-", "-", "-" };
                     var raw = GetTaskList(syncHash);
                     if (raw != null) {
@@ -384,7 +449,7 @@ namespace OmniAdmin {
                     }
                 }
                 else if (activeMode == "Apps") {
-                    colHeaders = new string[] { "Name", "Version", "Publisher", "Type", "Install Date" };
+                    colHeaders = new string[] { "Name (1)", "Version (2)", "Publisher (3)", "Type (4)", "Date (5)" };
                     colProps = new string[] { "DisplayName", "DisplayVersion", "Publisher", "AppType", "InstallDate" };
                     int avail = Math.Max(20, frameWidth - 42);
                     int nameW = (int)Math.Floor(avail * 0.6);
@@ -399,7 +464,7 @@ namespace OmniAdmin {
                     }
                 }
                 else if (activeMode == "Users") {
-                    colHeaders = new string[] { "USER", "SESSION", "ID", "STATE", "IDLE", "LOGON TIME" };
+                    colHeaders = new string[] { "USER (1)", "SESSION (2)", "ID (3)", "STATE (4)", "IDLE (5)", "LOGON TIME (6)" };
                     colProps = new string[] { "UserName", "SessionName", "SessionId", "State", "IdleTime", "LogonTime" };
                     colWidths = new int[] { 20, 15, 10, 12, 15, 20 };
                     colAligns = new string[] { "-", "-", "-", "-", "-", "-" };
@@ -411,6 +476,25 @@ namespace OmniAdmin {
                         listToRender = GetSortedList(raw, colProps[selColIndex], isDesc);
                     }
                 }
+                else if (activeMode == "History") {
+                    colHeaders = new string[] { "Time (1)", "User (2)", "Browser (3)", "Title (4)", "URL (5)" };
+                    colProps = new string[] { "Time", "User", "Browser", "Title", "URL" };
+                    colWidths = new int[] { 22, 11, 12, (int)Math.Floor((frameWidth - 45) * 0.45), (int)Math.Floor((frameWidth - 45) * 0.55) };
+                    // ensure exact sum to frameWidth to prevent horizontal scrollbar or line wraps
+                    colWidths[4] = frameWidth - colWidths[0] - colWidths[1] - colWidths[2] - colWidths[3];
+                    colAligns = new string[] { "-", "-", "-", "-", "-" };
+                    
+                    var raw = historyList;
+                    if (raw != null) {
+                        if (!string.IsNullOrEmpty(filterText)) {
+                            raw = raw.FindAll(h => GetString(h, "Title").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                   GetString(h, "URL").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                   GetString(h, "User").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0);
+                        }
+                        listToRender = GetSortedList(raw, colProps[selColIndex], isDesc);
+                    }
+                }
+
 
                 // Grid stats paging calculations
                 int totalCount = listToRender.Count;
@@ -433,6 +517,7 @@ namespace OmniAdmin {
                 else if (activeMode == "Tasks") headerColor = "\x1b[36m"; // Cyan
                 else if (activeMode == "Users") headerColor = "\x1b[35m"; // Magenta
                 else if (activeMode == "Apps") headerColor = "\x1b[32m"; // Green
+                else if (activeMode == "History") headerColor = "\x1b[94m"; // Bright Blue
 
                 string titlePage = "";
                 if (activeMode != "SpeedTest") {
@@ -504,7 +589,10 @@ namespace OmniAdmin {
                     string actionStatus = GetString(syncHash["ActionStatus"]);
                     string error = GetString(syncHash["Error"]);
                     if (!string.IsNullOrEmpty(actionStatus)) {
-                        sb.Append(string.Format("  {0}", actionStatus).PadRight(frameWidth) + "\n");
+                        // Truncate to frameWidth-2 before padding to prevent buffer overflow from long messages
+                        string statusLine = string.Format("  {0}", actionStatus);
+                        if (statusLine.Length > frameWidth - 1) statusLine = statusLine.Substring(0, frameWidth - 4) + "...";
+                        sb.Append(statusLine.PadRight(frameWidth) + "\n");
                     } else if (!string.IsNullOrEmpty(error)) {
                         sb.Append(string.Format("  {0}", error).PadRight(frameWidth) + "\n");
                     } else {
@@ -665,7 +753,28 @@ namespace OmniAdmin {
                         else sb.Append(string.Format("\x1b[90m{0}\x1b[0m ", cell));
                     }
                     sb.Append("\n");
-                    sb.Append("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
+                    sb.Append("\x1b[90m" + new string('\u2500', frameWidth) + "\x1b[0m\n");
+
+                    // --- HISTORY TIMEFRAME SELECTOR (replaces grid rows when not yet configured) ---
+                    if (activeMode == "History" && !historyConfigured) {
+                        sb.Append(("  \x1b[97mSelect history timeframe to load:\x1b[0m").PadRight(frameWidth) + "\n");
+                        sb.Append(" ".PadRight(frameWidth) + "\n");
+                        string[] presets = new string[] {
+                            "  [1]  1 Day     (last 24 hours)",
+                            "  [2]  7 Days    (last week)",
+                            "  [3]  14 Days   (last 2 weeks)",
+                            "  [4]  30 Days   (last month)",
+                            "  [5]  90 Days   (last 3 months)",
+                            "  [C]  Custom... (enter any number of days)"
+                        };
+                        foreach (string opt in presets) {
+                            sb.Append(("  \x1b[36m" + opt + "\x1b[0m").PadRight(frameWidth) + "\n");
+                        }
+                        sb.Append(" ".PadRight(frameWidth) + "\n");
+                        sb.Append(("  \x1b[90mPress a number key or [C] for custom entry.\x1b[0m").PadRight(frameWidth) + "\n");
+                        int selFiller = maxAvailableRows - presets.Length - 4;
+                        for (int x = 0; x < selFiller; x++) sb.Append(" ".PadRight(frameWidth) + "\n");
+                    } else {
 
                     // Render grid items
                     int skip = pageIndex * currentPageSize;
@@ -679,6 +788,35 @@ namespace OmniAdmin {
                             
                             if (activeMode == "Processes") {
                                 string pName = GetString(item, "Name");
+                                if (pName.StartsWith("svchost", StringComparison.OrdinalIgnoreCase)) {
+                                    pName = System.Text.RegularExpressions.Regex.Replace(pName, @"#\d+$", "");
+                                    int pid = GetInt(item, "IDProcess");
+                                    var serviceHostMap = syncHash["ServiceHostMap"] as IDictionary;
+                                    if (serviceHostMap != null && serviceHostMap.Contains(pid)) {
+                                        var servicesObj = serviceHostMap[pid];
+                                        if (servicesObj != null) {
+                                            servicesObj = Unwrap(servicesObj);
+                                            string servicesStr = "";
+                                            if (servicesObj is string) {
+                                                servicesStr = (string)servicesObj;
+                                            } else if (servicesObj is IEnumerable) {
+                                                var list = new List<string>();
+                                                foreach (var s in (IEnumerable)servicesObj) {
+                                                    if (s != null) {
+                                                        list.Add(Unwrap(s).ToString());
+                                                    }
+                                                }
+                                                servicesStr = string.Join(", ", list);
+                                            } else {
+                                                servicesStr = servicesObj.ToString();
+                                            }
+
+                                            if (!string.IsNullOrEmpty(servicesStr)) {
+                                                pName = string.Format("{0} ({1})", pName, servicesStr);
+                                            }
+                                        }
+                                    }
+                                }
                                 if (pName.Length > colWidths[1]) pName = pName.Substring(0, colWidths[1]);
                                 double rawCpu = GetDouble(item, "PercentProcessorTime");
                                 int coreCount = ToInt(syncHash["Cores"], 1);
@@ -800,17 +938,72 @@ namespace OmniAdmin {
                                     sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
                                 }
                             }
+                            else if (activeMode == "History") {
+                                string rawTime = GetString(item, "Time");
+                                string timeStr = "--";
+                                DateTime timeVal;
+                                if (DateTime.TryParse(rawTime, out timeVal)) {
+                                    timeStr = timeVal.ToString("MM/dd/yyyy HH:mm:ss");
+                                }
+                                if (timeStr.Length > colWidths[0]) timeStr = timeStr.Substring(0, colWidths[0]);
+
+                                string uName = GetString(item, "User");
+                                if (uName.Length > colWidths[1]) uName = uName.Substring(0, colWidths[1]);
+
+                                string browser = GetString(item, "Browser");
+                                if (browser.Length > colWidths[2]) browser = browser.Substring(0, colWidths[2]);
+
+                                string title = GetString(item, "Title");
+                                if (title.Length > colWidths[3]) title = title.Substring(0, colWidths[3]);
+
+                                string url = GetString(item, "URL");
+                                if (url.Length > colWidths[4]) url = url.Substring(0, colWidths[4]);
+
+                                line = string.Format("  {0,-" + colWidths[0] + "} {1,-" + colWidths[1] + "} {2,-" + colWidths[2] + "} {3,-" + colWidths[3] + "} {4,-" + colWidths[4] + "}",
+                                    timeStr, uName, browser, title, url);
+                                if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
+
+                                if (i == selectedRow) {
+                                    sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                } else {
+                                    sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                }
+                            }
                         } else {
                             sb.Append(" ".PadRight(frameWidth) + "\n");
                         }
                         rowsDrawn++;
                     }
                     
-                    // Draw filler rows to maintain grid size exactly
+                    // Draw filler rows to maintain grid size exactly.
+                    // For History mode: if there's an error, show it word-wrapped in the empty rows.
                     int empty = currentPageSize - rowsDrawn;
-                    for (int x = 0; x < empty; x++) {
-                        sb.Append(" ".PadRight(frameWidth) + "\n");
+                    string historyError = activeMode == "History" ? GetString(syncHash["HistoryError"]) : "";
+                    if (!string.IsNullOrEmpty(historyError) && empty > 0) {
+                        int lineW = frameWidth - 4;
+                        // Split on literal "\n" (escaped) and real newlines
+                        string[] paragraphs = historyError.Replace("\\n", "\n").Split('\n');
+                        int linesWritten = 0;
+                        foreach (string para in paragraphs) {
+                            if (linesWritten >= empty) break;
+                            if (string.IsNullOrEmpty(para)) {
+                                sb.Append(" ".PadRight(frameWidth) + "\n");
+                                linesWritten++;
+                                continue;
+                            }
+                            string rem = para;
+                            while (rem.Length > 0 && linesWritten < empty) {
+                                string chunk = rem.Length <= lineW ? rem : rem.Substring(0, lineW);
+                                rem = rem.Length <= lineW ? "" : rem.Substring(lineW);
+                                sb.Append(("  \x1b[91m" + chunk + "\x1b[0m").PadRight(frameWidth) + "\n");
+                                linesWritten++;
+                            }
+                        }
+                        for (int x = linesWritten; x < empty; x++) {
+                            sb.Append(" ".PadRight(frameWidth) + "\n");
+                        }
                     }
+                }
                 }
 
                 // 3. Footer Separator and Menu Bar
@@ -823,6 +1016,12 @@ namespace OmniAdmin {
                 else if (activeMode == "Apps") footerText = " [S] Search  |  [1-5] Sort  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
                 else if (activeMode == "Users") footerText = " [S] Search  |  [L] Logoff User  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
                 else if (activeMode == "SpeedTest") footerText = " [UpDown] Select Field  |  [<-/->] Adjust  |  [Enter] Edit/Start  |  [M] Menu  |  [ESC] Back ";
+                else if (activeMode == "History") {
+                    if (!historyConfigured)
+                        footerText = " [1] 1 Day  [2] 7 Days  [3] 14 Days  [4] 30 Days  [5] 90 Days  [C] Custom  |  [M] Menu  |  [ESC] Back ";
+                    else
+                        footerText = " [S] Search  |  [1-5] Sort  |  [Enter] Details  |  [R] Change Days  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
+                }
 
                 string footerBg = "\x1b[40m"; // Black background
                 string footerFg = "\x1b[36m"; // Cyan text
@@ -920,9 +1119,91 @@ namespace OmniAdmin {
                     }
                 }
 
-                // 3. Main Menu Overlay (Uses decoupled menuSelectedIndex)
+                // 3. History Row Detail Overlay
+                if (showHistoryDetail && activeMode == "History") {
+                    var rawH = historyList;
+                    if (rawH != null && !string.IsNullOrEmpty(filterText)) {
+                        rawH = rawH.FindAll(h => GetString(h, "Title").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                               GetString(h, "URL").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                               GetString(h, "User").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0);
+                    }
+                    if (rawH != null) {
+                        var sortedH = GetSortedList(rawH, colProps[selColIndex], isDesc);
+                        int absIdx = (pageIndex * currentPageSize) + selectedRow;
+                        if (absIdx < sortedH.Count) {
+                            var item = sortedH[absIdx];
+
+                            // Overlay dimensions — wide to fit URLs
+                            int boxW = Math.Min(width - 4, 110);
+                            int boxH = 14;
+                            int startX = (width - boxW) / 2;
+                            int startY = (height - boxH) / 2;
+                            int innerW = boxW - 4; // usable content width inside padding
+
+                            // Background fill
+                            for (int y = 0; y <= boxH; y++) {
+                                sb.Append(string.Format("\x1b[{0};{1}H", startY + y + 1, startX + 1));
+                                sb.Append("\x1b[37;40m\x1b[44m" + new string(' ', boxW) + "\x1b[0m");
+                            }
+
+                            // Title bar
+                            string detTitle = " HISTORY ENTRY DETAILS ";
+                            int titleX = startX + (boxW - detTitle.Length) / 2;
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[97;44m{2}\x1b[0m", startY + 1, titleX, detTitle));
+
+                            // Helper: render a labelled field with word-wrap across up to maxLines rows
+                            // Returns the number of rows consumed
+                            // Field rendering inline:
+                            string fTime = GetString(item, "Time");
+                            string fUser = GetString(item, "User");
+                            string fBrowser = GetString(item, "Browser");
+                            string fTitle = GetString(item, "Title");
+                            string fUrl = GetString(item, "URL");
+
+                            // Parse and reformat time
+                            DateTime tVal;
+                            if (DateTime.TryParse(fTime, out tVal)) fTime = tVal.ToString("yyyy-MM-dd HH:mm:ss");
+
+                            int row = startY + 3;
+                            // Fixed one-line fields
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m Time   : {2}\x1b[0m", row++, startX + 2, fTime));
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m User   : {2}\x1b[0m", row++, startX + 2, fUser));
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m Browser: {2}\x1b[0m", row++, startX + 2, fBrowser));
+                            row++; // blank separator
+
+                            // Title — word-wrap up to 2 lines
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[33;44m Title:\x1b[0m", row++, startX + 2));
+                            string remTitle = fTitle;
+                            int titleLines = 0;
+                            while (remTitle.Length > 0 && titleLines < 2) {
+                                string chunk = remTitle.Length <= innerW ? remTitle : remTitle.Substring(0, innerW);
+                                remTitle = remTitle.Length <= innerW ? "" : remTitle.Substring(innerW);
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m {2}\x1b[0m", row++, startX + 2, chunk));
+                                titleLines++;
+                            }
+
+                            row++; // blank separator
+
+                            // URL — word-wrap up to 3 lines
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[33;44m URL:\x1b[0m", row++, startX + 2));
+                            string remUrl = fUrl;
+                            int urlLines = 0;
+                            while (remUrl.Length > 0 && urlLines < 3) {
+                                string chunk = remUrl.Length <= innerW ? remUrl : remUrl.Substring(0, innerW);
+                                remUrl = remUrl.Length <= innerW ? "" : remUrl.Substring(innerW);
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[97;44m {2}\x1b[0m", row++, startX + 2, chunk));
+                                urlLines++;
+                            }
+
+                            // Footer
+                            sb.Append(string.Format("\x1b[{0};{1}H\x1b[90;44m [ESC] Close\x1b[0m", startY + boxH, startX + 2));
+                        }
+                    }
+                }
+
+                // 4. Main Menu Overlay (Uses decoupled menuSelectedIndex)
                 if (showMainMenu) {
-                    int boxW = 50, boxH = 12;
+                    int boxW = 50, boxH = 13;
                     int startX = (width - boxW) / 2;
                     int startY = (height - boxH) / 2;
 
@@ -939,7 +1220,8 @@ namespace OmniAdmin {
                         "  [3] Scheduled Tasks",
                         "  [4] Installed Applications",
                         "  [5] Active User Sessions",
-                        "  [6] Speed Test Monitor"
+                        "  [6] Speed Test Monitor",
+                        "  [7] Browser History View"
                     };
 
                     for (int i = 0; i < items.Length; i++) {
@@ -950,7 +1232,7 @@ namespace OmniAdmin {
                             sb.Append(string.Format("\x1b[37;44m{0}\x1b[0m", items[i]));
                         }
                     }
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m[ESC] Close\x1b[0m", startY + 11, startX + 3));
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m[ESC] Close\x1b[0m", startY + boxH - 1, startX + 3));
                 }
 
                 // --- WRITE COMPLETED BUFFER TO SCREEN ---
@@ -981,6 +1263,7 @@ namespace OmniAdmin {
                         if (showMainMenu) showMainMenu = false;
                         else if (showServiceProps) showServiceProps = false;
                         else if (showTaskProps) showTaskProps = false;
+                        else if (showHistoryDetail) showHistoryDetail = false;
                         else {
                             activeMode = "Processes";
                             showMainMenu = false;
@@ -991,10 +1274,10 @@ namespace OmniAdmin {
                     // --- INPUT HANDLING: MAIN MENU ---
                     if (showMainMenu) {
                         if (key == ConsoleKey.UpArrow) {
-                            menuSelectedIndex = (menuSelectedIndex - 1 + 6) % 6;
+                            menuSelectedIndex = (menuSelectedIndex - 1 + 7) % 7;
                         }
                         else if (key == ConsoleKey.DownArrow) {
-                            menuSelectedIndex = (menuSelectedIndex + 1) % 6;
+                            menuSelectedIndex = (menuSelectedIndex + 1) % 7;
                         }
                         else if (key == ConsoleKey.Enter) {
                             if (menuSelectedIndex == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
@@ -1003,6 +1286,7 @@ namespace OmniAdmin {
                             else if (menuSelectedIndex == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
                             else if (menuSelectedIndex == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
                             else if (menuSelectedIndex == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
+                            else if (menuSelectedIndex == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
 
                             showMainMenu = false;
                             selectedRow = 0;
@@ -1010,7 +1294,7 @@ namespace OmniAdmin {
                             filterText = "";
                             Console.Clear();
                         }
-                        else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D6) {
+                        else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
                             int choice = (int)key - (int)ConsoleKey.D1;
                             if (choice == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
                             else if (choice == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
@@ -1018,6 +1302,7 @@ namespace OmniAdmin {
                             else if (choice == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
                             else if (choice == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
                             else if (choice == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
+                            else if (choice == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
 
                             showMainMenu = false;
                             selectedRow = 0;
@@ -1115,7 +1400,44 @@ namespace OmniAdmin {
                     }
                     // --- INPUT HANDLING: GRID NAVIGATION PANELS ---
                     else {
-                        if (showServiceProps || showTaskProps) {
+                        if (showServiceProps || showTaskProps || showHistoryDetail) {
+                            // While a detail panel is open, only process Escape (handled above)
+                            Thread.Sleep(50);
+                            continue;
+                        }
+
+                        if (activeMode == "History" && !historyConfigured) {
+                            if (key == ConsoleKey.D1 || key == ConsoleKey.NumPad1) {
+                                historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                            }
+                            else if (key == ConsoleKey.D2 || key == ConsoleKey.NumPad2) {
+                                historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                            }
+                            else if (key == ConsoleKey.D3 || key == ConsoleKey.NumPad3) {
+                                historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                            }
+                            else if (key == ConsoleKey.D4 || key == ConsoleKey.NumPad4) {
+                                historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                            }
+                            else if (key == ConsoleKey.D5 || key == ConsoleKey.NumPad5) {
+                                historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                            }
+                            else if (key == ConsoleKey.C) {
+                                Console.CursorVisible = true;
+                                Console.SetCursorPosition(0, height - 1);
+                                Console.Write("\x1b[36m ENTER CUSTOM DAYS (1-365): \x1b[0m");
+                                string inputDays = Console.ReadLine();
+                                int parsedDays;
+                                if (int.TryParse(inputDays, out parsedDays) && parsedDays >= 1 && parsedDays <= 365) {
+                                    historyDays = parsedDays;
+                                    historyConfigured = true;
+                                    historyList = null;
+                                    syncHash["HistoryData"] = null;
+                                }
+                                Console.CursorVisible = false;
+                                Console.SetCursorPosition(0, 0);
+                                Console.Clear();
+                            }
                             Thread.Sleep(50);
                             continue;
                         }
@@ -1142,6 +1464,9 @@ namespace OmniAdmin {
                         }
                         else if (key == ConsoleKey.RightArrow) {
                             if (pageIndex < (maxPages - 1)) { pageIndex++; selectedRow = 0; }
+                        }
+                        else if (key == ConsoleKey.Enter && activeMode == "History" && totalCount > 0) {
+                            showHistoryDetail = true;
                         }
                         else if (key == ConsoleKey.P) {
                             if (activeMode == "Services") {
@@ -1214,14 +1539,23 @@ namespace OmniAdmin {
                                 queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { sid });
                             }
                         }
-                        else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D6) {
+                        else if (key == ConsoleKey.R && activeMode == "History" && !loadingHistory) {
+                            historyList = null;
+                            loadingHistory = false;
+                            historyConfigured = false;
+                            syncHash["HistoryData"] = null;
+                            syncHash["HistoryError"] = null;
+                            syncHash["ActionStatus"] = "";
+                            Console.Clear();
+                        }
+                        else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
                             int choice = (int)key - (int)ConsoleKey.D1;
                             if (choice < colHeaders.Length) {
                                 if (selColIndex == choice) {
                                     isDesc = !isDesc;
                                 } else {
                                     selColIndex = choice;
-                                    isDesc = (activeMode == "Processes" && (choice == 2 || choice == 3));
+                                    isDesc = (activeMode == "Processes" && (choice == 2 || choice == 3)) || (activeMode == "History" && choice == 0);
                                 }
                             }
                         }
@@ -1230,6 +1564,9 @@ namespace OmniAdmin {
 
                 Thread.Sleep(50);
             }
+            
+            try { if (speedTestPS != null) speedTestPS.Dispose(); } catch {}
+            try { if (historyPS != null) historyPS.Dispose(); } catch {}
 
             Console.CursorVisible = true;
             Console.Clear();
@@ -1265,6 +1602,13 @@ namespace OmniAdmin {
         }
         public static List<object> GetUserList(Hashtable syncHash) {
             var raw = Unwrap(syncHash["UserData"]) as IEnumerable;
+            if (raw == null) return new List<object>();
+            var list = new List<object>();
+            foreach (var item in raw) list.Add(item);
+            return list;
+        }
+        public static List<object> GetHistoryList(Hashtable syncHash) {
+            var raw = Unwrap(syncHash["HistoryData"]) as IEnumerable;
             if (raw == null) return new List<object>();
             var list = new List<object>();
             foreach (var item in raw) list.Add(item);

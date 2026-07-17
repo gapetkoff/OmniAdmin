@@ -190,8 +190,57 @@ function Start-SystemMonitor {
         Clear-Host
     #endregion
 
+        # Load BrowserHistory script and sqlite3 base64 path into SyncHash
+        # Resolve module root dynamically - works on any computer regardless of install path.
+        # Strategy 1: ScriptBlock.File from Get-Command - most reliable, returns the actual .ps1 source path
+        $ModuleRoot = $null
+        $dbgLog = "PathRes: "
+        try {
+            $cmd = Get-Command Start-SystemMonitor -ErrorAction SilentlyContinue
+            $sbFile = if ($cmd) { $cmd.ScriptBlock.File } else { $null }
+            if ($sbFile) {
+                # ScriptBlock.File = .../Public/Start-SystemMonitor.ps1 -> parent's parent = module root
+                $ModuleRoot = Split-Path -Parent (Split-Path -Parent $sbFile)
+                $dbgLog += "SBF=$sbFile->$ModuleRoot"
+            } else {
+                $dbgLog += "SBF=null"
+            }
+        } catch { $dbgLog += "SBF threw: $_" }
+
+        # Strategy 2: Module.ModuleBase from Get-Command
+        if (-not $ModuleRoot) {
+            try {
+                $cmd = Get-Command Start-SystemMonitor -ErrorAction SilentlyContinue
+                if ($cmd -and $cmd.Module -and $cmd.Module.ModuleBase) {
+                    $ModuleRoot = $cmd.Module.ModuleBase
+                    $dbgLog += " | GCM=$ModuleRoot"
+                } else { $dbgLog += " | GCM=noMod" }
+            } catch { $dbgLog += " | GCM threw: $_" }
+        }
+
+        # Strategy 3: PSScriptRoot parent (works when dot-sourced directly)
+        if (-not $ModuleRoot -and $PSScriptRoot) {
+            $ModuleRoot = Split-Path -Parent $PSScriptRoot
+            $dbgLog += " | PSR=$ModuleRoot"
+        }
+
+        $HistoryScriptPath = Join-Path $ModuleRoot "Public\Get-BrowserHistory.ps1"
+        $dbgLog += " | HP=$(Test-Path $HistoryScriptPath):$HistoryScriptPath"
+        if (Test-Path $HistoryScriptPath) {
+            $SyncHash.BrowserHistoryScript = Get-Content $HistoryScriptPath -Raw
+            $dbgLog += " LOADED"
+        }
+
+        $B64Path = Join-Path $ModuleRoot "Private\sqlite3.exe.b64"
+        $dbgLog += " | B64=$(Test-Path $B64Path)"
+        if (Test-Path $B64Path) {
+            $SyncHash.SqliteB64Path = (Resolve-Path $B64Path).Path
+        }
+
+        $SyncHash.DebugLog = $dbgLog
+
         # Compile TuiEngine if not loaded
-        $TuiEnginePath = Join-Path $PSScriptRoot "..\Private\TuiEngine.cs"
+        $TuiEnginePath = Join-Path $ModuleRoot "Private\TuiEngine.cs"
         if (Test-Path $TuiEnginePath) {
             if (-not ("OmniAdmin.TuiEngine" -as [type])) {
                 $TuiCode = Get-Content $TuiEnginePath -Raw

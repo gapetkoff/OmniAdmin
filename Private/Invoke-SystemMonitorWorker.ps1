@@ -1,4 +1,4 @@
-function Invoke-SystemMonitorWorker {
+﻿function Invoke-SystemMonitorWorker {
     param($Sync)
     
     $Session = $null
@@ -138,13 +138,15 @@ function Invoke-SystemMonitorWorker {
             $GpuCycleCount++
             $DoGpu = ($GpuCycleCount -ge 5)
             if ($DoGpu) { $GpuCycleCount = 0 }
+
+            $DoSvcHost = ($CycleCount % 5 -eq 0)
             
             # Pass logical core count so the Run-Script block can normalize per-core CPU %
             $CoreCount = if ($Sync.StaticData -and $Sync.StaticData.Cores -gt 0) { [int]$Sync.StaticData.Cores } else { 1 }
-            $ArgsArray = @([bool]$FetchUsers, [bool]$Sync.ServiceModeActive, [bool]$Sync.TaskModeActive, [bool]$DoGpu, [bool]$FetchApps, [int]$CoreCount, [bool]($CycleCount -eq 0))
+            $ArgsArray = @([bool]$FetchUsers, [bool]$Sync.ServiceModeActive, [bool]$Sync.TaskModeActive, [bool]$DoGpu, [bool]$FetchApps, [int]$CoreCount, [bool]($CycleCount -eq 0), [bool]$DoSvcHost)
 
             $Result = Run-Script -Script {
-                param($DoUsers, $DoServices, $DoTasks, $DoGpu, $DoApps, $CoreCount, $IsFirstCycle)
+                param($DoUsers, $DoServices, $DoTasks, $DoGpu, $DoApps, $CoreCount, $IsFirstCycle, $DoSvcHost)
                 
                 $DebugStr = ""
 
@@ -341,6 +343,21 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
                     } catch { $DebugStr += "App:Err " }
                 }
 
+                $ServiceHostMap = @{}
+                if ($DoSvcHost) {
+                    try {
+                        $RunningServices = Get-CimInstance Win32_Service -Filter "State='Running' and ProcessId > 0" -ErrorAction SilentlyContinue
+                        foreach ($Svc in $RunningServices) {
+                            $SvcPid = [int]$Svc.ProcessId
+                            $SvcName = [string]$Svc.Name
+                            if (-not $ServiceHostMap.ContainsKey($SvcPid)) {
+                                $ServiceHostMap[$SvcPid] = @()
+                            }
+                            $ServiceHostMap[$SvcPid] += $SvcName
+                        }
+                    } catch {}
+                }
+
                 # V71: Safety clamps on total system stats to avoid overflow anomalies
                 $SafeCpuLoad = if ($CpuTotal) { [math]::Min(100, [math]::Max(0, [math]::Round([double]$CpuTotal.PercentProcessorTime))) } else { 0 }
                 $SafeDiskR   = if ($DiskIO) { [math]::Round([double]$DiskIO.DiskReadBytesPersec / 1MB, 1) } else { 0 }
@@ -364,6 +381,7 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
                     AppList   = $AppList
                     DebugStr  = $DebugStr
                     ThreadCount = $ThreadCnt
+                    ServiceHostMap = $ServiceHostMap
                 }
             } -Arguments $ArgsArray
 
@@ -379,6 +397,7 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
             if ($Result.SvcList) { $Sync.ServiceData = @($Result.SvcList) }
             if ($Result.TaskList) { $Sync.TaskData = @($Result.TaskList) }
             if ($Result.AppList) { $Sync.AppData = @($Result.AppList) }
+            if ($DoSvcHost -and $Result.ServiceHostMap) { $Sync.ServiceHostMap = $Result.ServiceHostMap }
             
             if ($Result.DebugStr) { $Sync.DebugLog = $Result.DebugStr }
             
