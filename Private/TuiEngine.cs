@@ -749,8 +749,12 @@ namespace OmniAdmin {
                         string fmt = "{0," + colAligns[i] + colWidths[i] + "}";
                         string cell = string.Format(fmt, hText);
                         
-                        if (i == selColIndex) sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m ", cell));
-                        else sb.Append(string.Format("\x1b[90m{0}\x1b[0m ", cell));
+                        if (i == selColIndex) sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", cell));
+                        else sb.Append(string.Format("\x1b[90m{0}\x1b[0m", cell));
+                        
+                        if (i < colHeaders.Length - 1) {
+                            sb.Append("\x1b[90m│\x1b[0m");
+                        }
                     }
                     sb.Append("\n");
                     sb.Append("\x1b[90m" + new string('\u2500', frameWidth) + "\x1b[0m\n");
@@ -829,9 +833,22 @@ namespace OmniAdmin {
                                 
                                 string icon = cpuVal > 50 ? "!" : (cpuVal > 25 ? "*" : " ");
                                 string pidStr = icon + GetString(item, "IDProcess");
-                                
-                                line = string.Format(" {0,-8} {1,-" + colWidths[1] + "} {2,10:0.0} {3,10} {4,10} {5,10}",
-                                    pidStr, pName, cpuVal, memVal, GetString(item, "ThreadCount"), GetString(item, "HandleCount"));
+                                if (pidStr.Length > colWidths[0]) pidStr = pidStr.Substring(0, colWidths[0]);
+
+                                string cpuStr = string.Format("{0:0.0}", cpuVal);
+                                if (cpuStr.Length > colWidths[2]) cpuStr = cpuStr.Substring(0, colWidths[2]);
+
+                                string memStr = memVal.ToString();
+                                if (memStr.Length > colWidths[3]) memStr = memStr.Substring(0, colWidths[3]);
+
+                                string thrStr = GetString(item, "ThreadCount");
+                                if (thrStr.Length > colWidths[4]) thrStr = thrStr.Substring(0, colWidths[4]);
+
+                                string hndStr = GetString(item, "HandleCount");
+                                if (hndStr.Length > colWidths[5]) hndStr = hndStr.Substring(0, colWidths[5]);
+
+                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2," + colWidths[2] + "}│{3," + colWidths[3] + "}│{4," + colWidths[4] + "}│{5," + colWidths[5] + "}",
+                                    pidStr, pName, cpuStr, memStr, thrStr, hndStr);
                                     
                                 if (cpuVal > 75) fg = "\x1b[31m"; // Red
                                 else if (cpuVal > 50) fg = "\x1b[33m"; // Yellow
@@ -851,8 +868,13 @@ namespace OmniAdmin {
                                 string dName = GetString(item, "DisplayName");
                                 if (dName.Length > colWidths[2]) dName = dName.Substring(0, colWidths[2]);
                                 
-                                line = string.Format("  {0,-10} {1,-" + colWidths[1] + "} {2,-" + colWidths[2] + "} {3,-10}",
-                                    status, sName, dName, GetString(item, "StartType"));
+                                string statusStr = status;
+                                if (statusStr.Length > colWidths[0]) statusStr = statusStr.Substring(0, colWidths[0]);
+                                string startTypeStr = GetString(item, "StartType");
+                                if (startTypeStr.Length > colWidths[3]) startTypeStr = startTypeStr.Substring(0, colWidths[3]);
+
+                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}",
+                                    statusStr, sName, dName, startTypeStr);
                                 
                                 if (status == "Running") fg = "\x1b[32m"; // Green
                                 else if (status == "Stopped") fg = "\x1b[31m"; // Red
@@ -876,8 +898,13 @@ namespace OmniAdmin {
                                 }
                                 string res = GetString(item, "LastTaskResult");
                                 
-                                line = string.Format("  {0,-10} {1,-" + colWidths[1] + "} {2,-" + colWidths[2] + "} {3,-10}",
-                                    state, tName, last, res);
+                                string stateStr = state;
+                                if (stateStr.Length > colWidths[0]) stateStr = stateStr.Substring(0, colWidths[0]);
+                                string resStr = res;
+                                if (resStr.Length > colWidths[3]) resStr = resStr.Substring(0, colWidths[3]);
+
+                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}",
+                                    stateStr, tName, last, resStr);
                                     
                                 if (state == "Running") fg = "\x1b[32m"; // Green
                                 else if (state == "Ready") fg = "\x1b[37m"; // White
@@ -887,10 +914,14 @@ namespace OmniAdmin {
                                     sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
                                 } else {
                                     string resColor = (res == "0") ? "\x1b[32m" : "\x1b[31m"; // Green for 0, Red for others
-                                    int len = line.Length;
-                                    string baseLine = line.Substring(0, len - 10).PadRight(frameWidth - 10);
-                                    string resultCell = string.Format("{0,-10}", res);
-                                    sb.Append(fg + baseLine + resColor + resultCell + "\x1b[0m\n");
+                                    int sepIdx = line.LastIndexOf('│');
+                                    if (sepIdx >= 0) {
+                                        string baseLine = line.Substring(0, sepIdx + 1);
+                                        string resultCell = line.Substring(sepIdx + 1).PadRight(frameWidth - sepIdx - 1);
+                                        sb.Append(fg + baseLine + resColor + resultCell + "\x1b[0m\n");
+                                    } else {
+                                        sb.Append(fg + line.PadRight(frameWidth) + "\x1b[0m\n");
+                                    }
                                 }
                             }
                             else if (activeMode == "Apps") {
@@ -905,7 +936,7 @@ namespace OmniAdmin {
                                 string date = GetString(item, "InstallDate");
                                 date = date.PadRight(colWidths[4]).Substring(0, colWidths[4]);
                                 
-                                line = "  " + aName + " " + ver + " " + pub + " " + type + " " + date;
+                                line = "  " + aName + "│" + ver + "│" + pub + "│" + type + "│" + date;
                                 line = line.PadRight(frameWidth).Substring(0, frameWidth);
                                 
                                 if (i == selectedRow) {
@@ -928,7 +959,7 @@ namespace OmniAdmin {
                                 string logon = GetString(item, "LogonTime");
                                 if (logon.Length > colWidths[5]) logon = logon.Substring(0, colWidths[5]);
                                 
-                                line = string.Format("  {0,-20} {1,-15} {2,-10} {3,-12} {4,-15} {5,-20}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}│{4,-" + colWidths[4] + "}│{5,-" + colWidths[5] + "}",
                                     uName, sName, sid, state, idle, logon);
                                 if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
                                 
@@ -959,7 +990,7 @@ namespace OmniAdmin {
                                 string url = GetString(item, "URL");
                                 if (url.Length > colWidths[4]) url = url.Substring(0, colWidths[4]);
 
-                                line = string.Format("  {0,-" + colWidths[0] + "} {1,-" + colWidths[1] + "} {2,-" + colWidths[2] + "} {3,-" + colWidths[3] + "} {4,-" + colWidths[4] + "}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}│{4,-" + colWidths[4] + "}",
                                     timeStr, uName, browser, title, url);
                                 if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
 
