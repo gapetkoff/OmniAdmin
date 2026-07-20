@@ -238,18 +238,30 @@ function Invoke-SystemMonitorWorker {
                     try {
                         if (-not (Get-Module -Name ScheduledTasks)) { Import-Module ScheduledTasks -ErrorAction SilentlyContinue }
                         
-                        $RawTasks = Get-ScheduledTask -TaskPath "" -ErrorAction SilentlyContinue
-                        if (-not $RawTasks) { $RawTasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Select-Object -First 50 }
+                        $RawTasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Select-Object -First 100
+                        if ($RawTasks) {
+                            $TaskList = $RawTasks | ForEach-Object {
+                                $taskState = "Unknown"
+                                try { if ($_.State) { $taskState = $_.State.ToString() } } catch {}
+                                
+                                $lastRun = "--"
+                                $lastRes = "--"
+                                try {
+                                    $info = $_ | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue
+                                    if ($info) {
+                                        $lastRun = $info.LastRunTime
+                                        $lastRes = $info.LastTaskResult
+                                    }
+                                } catch {}
 
-                        $TaskList = $RawTasks | ForEach-Object {
-                            $info = $_ | Get-ScheduledTaskInfo
-                            [PSCustomObject]@{
-                                TaskName = $_.TaskName
-                                State = $_.State.ToString()
-                                LastRunTime = $info.LastRunTime
-                                LastTaskResult = $info.LastTaskResult
-                                Triggers = if ($_.Triggers) { "Yes" } else { "No" }
-                                Actions = if ($_.Actions) { "Yes" } else { "No" }
+                                [PSCustomObject]@{
+                                    TaskName       = [string]$_.TaskName
+                                    State          = [string]$taskState
+                                    LastRunTime    = $lastRun
+                                    LastTaskResult = [string]$lastRes
+                                    Triggers       = if ($_.Triggers) { "Yes" } else { "No" }
+                                    Actions        = if ($_.Actions) { "Yes" } else { "No" }
+                                }
                             }
                         }
                         $DebugStr += "Tsk: $($TaskList.Count) "
@@ -407,7 +419,7 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
             # FORCE UPDATE SHARED MEMORY
             if ($Result.UserList) { $Sync.UserData = @($Result.UserList) }
             if ($Result.SvcList) { $Sync.ServiceData = @($Result.SvcList) }
-            if ($Result.TaskList) { $Sync.TaskData = @($Result.TaskData) }
+            if ($Result.TaskList) { $Sync.TaskData = @($Result.TaskList) }
             if ($Result.AppList) { $Sync.AppData = @($Result.AppList) }
             if ($DoSvcHost -and $Result.ServiceHostMap) { $Sync.ServiceHostMap = $Result.ServiceHostMap }
             if ($DoSvcHost -and $Result.ProcessMap) { $Sync.ProcessMap = $Result.ProcessMap }

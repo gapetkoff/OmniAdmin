@@ -14,11 +14,23 @@ namespace OmniAdmin {
             if (filled > width) filled = width;
             
             string bar = new string('█', filled) + new string('░', width - filled);
-            if (percent > 85) colorAnsi = "\x1b[31m"; // Red
-            else if (percent > 60) colorAnsi = "\x1b[33m"; // Yellow
-            else colorAnsi = "\x1b[32m"; // Green
+            if (percent >= 85) colorAnsi = "\x1b[31;1m"; // Bold Red
+            else if (percent >= 60) colorAnsi = "\x1b[33;1m"; // Bold Yellow
+            else colorAnsi = "\x1b[36;1m"; // Bold Cyan
             
             return bar;
+        }
+
+        public static string FormatBoxLine(string ansiContent, int frameWidth, string themeColor = "\x1b[90m") {
+            int visibleLength = GetVisibleLength(ansiContent);
+            int pad = frameWidth - 4 - visibleLength;
+            if (pad < 0) pad = 0;
+            return string.Format("{0}│\x1b[0m {1}{2} {0}│\x1b[0m\n", themeColor, ansiContent, new string(' ', pad));
+        }
+
+        public static int GetVisibleLength(string text) {
+            if (string.IsNullOrEmpty(text)) return 0;
+            return System.Text.RegularExpressions.Regex.Replace(text, @"\x1b\[[0-9;]*m", "").Length;
         }
 
         // --- DYNAMIC PROPERTY READERS (Supports Hashtable, PSObject, Reflection) ---
@@ -394,19 +406,65 @@ namespace OmniAdmin {
                     }
                 }
 
-                // Dynamic Header Height
-                int headerHeight = 10;
-                object staticData = syncHash["StaticData"];
-                if (staticData != null && GetProperty(staticData, "GpuName") != null) headerHeight += 3;
-                if (diagnostics) headerHeight += 1;
-
-                // Page Sizing Calculation
-                int maxAvailableRows = height - headerHeight - 6;
-                if (maxAvailableRows < 1) maxAvailableRows = 1;
-                int currentPageSize = useFixedPageSize ? Math.Min(defaultPageSize, maxAvailableRows) : maxAvailableRows;
-
                 // Frame Width (Console buffer safety limit)
                 int frameWidth = width - 1;
+
+                // Dynamic Header & Footer Height Sizing
+                object staticData = syncHash["StaticData"];
+                int headerHeight = (staticData != null && GetProperty(staticData, "GpuName") != null) ? 10 : 9;
+                if (diagnostics) headerHeight += 1;
+
+                // Resolve Footer Items
+                string[] footerItems = new string[0];
+                if (activeMode == "Processes") {
+                    footerItems = new string[] { "\x1b[36;1m[S]\x1b[0m Search", "\x1b[36;1m[1-6]\x1b[0m Sort", "\x1b[36;1m[K]\x1b[0m Kill", "\x1b[36;1m[<-/->]\x1b[0m Page", "\x1b[36;1m[P]\x1b[0m " + (paused ? "Resume" : "Pause"), "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[Q]\x1b[0m Quit" };
+                } else if (activeMode == "Services") {
+                    footerItems = new string[] { "\x1b[33;1m[S]\x1b[0m Search", "\x1b[33;1m[P]\x1b[0m Props", "\x1b[33;1m[T]\x1b[0m Start/Stop", "\x1b[33;1m[R]\x1b[0m Restart", "\x1b[33;1m[<-/->]\x1b[0m Page", "\x1b[33;1m[M]\x1b[0m Menu", "\x1b[33;1m[ESC]\x1b[0m Back" };
+                } else if (activeMode == "Tasks") {
+                    footerItems = new string[] { "\x1b[36;1m[S]\x1b[0m Search", "\x1b[36;1m[T]\x1b[0m Toggle Run", "\x1b[36;1m[P]\x1b[0m Props", "\x1b[36;1m[1-4]\x1b[0m Sort", "\x1b[36;1m[<-/->]\x1b[0m Page", "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[ESC]\x1b[0m Back" };
+                } else if (activeMode == "Apps") {
+                    footerItems = new string[] { "\x1b[32;1m[S]\x1b[0m Search", "\x1b[32;1m[1-5]\x1b[0m Sort", "\x1b[32;1m[<-/->]\x1b[0m Page", "\x1b[32;1m[M]\x1b[0m Menu", "\x1b[32;1m[ESC]\x1b[0m Back" };
+                } else if (activeMode == "Users") {
+                    footerItems = new string[] { "\x1b[35;1m[S]\x1b[0m Search", "\x1b[35;1m[L]\x1b[0m Logoff User", "\x1b[35;1m[<-/->]\x1b[0m Page", "\x1b[35;1m[M]\x1b[0m Menu", "\x1b[35;1m[ESC]\x1b[0m Back" };
+                } else if (activeMode == "SpeedTest") {
+                    if (ToBool(st["Running"])) {
+                        footerItems = new string[] { "\x1b[33;1mTesting in progress... Please do not close or resize the terminal.\x1b[0m" };
+                    } else {
+                        footerItems = new string[] { "\x1b[36;1m[UpDown]\x1b[0m Select", "\x1b[36;1m[<-/->]\x1b[0m Adjust", "\x1b[36;1m[Enter]\x1b[0m Start", "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[ESC]\x1b[0m Back" };
+                    }
+                } else if (activeMode == "History") {
+                    if (!historyConfigured)
+                        footerItems = new string[] { "\x1b[94;1m[1]\x1b[0m 1d", "\x1b[94;1m[2]\x1b[0m 7d", "\x1b[94;1m[3]\x1b[0m 14d", "\x1b[94;1m[4]\x1b[0m 30d", "\x1b[94;1m[5]\x1b[0m 90d", "\x1b[94;1m[C]\x1b[0m Custom", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
+                    else
+                        footerItems = new string[] { "\x1b[94;1m[S]\x1b[0m Search", "\x1b[94;1m[1-5]\x1b[0m Sort", "\x1b[94;1m[Enter]\x1b[0m Details", "\x1b[94;1m[R]\x1b[0m Change Days", "\x1b[94;1m[<-/->]\x1b[0m Page", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
+                }
+
+                string singleLineFooter = " " + string.Join("  \x1b[90m│\x1b[0m  ", footerItems);
+                int visSingleLen = GetVisibleLength(singleLineFooter);
+
+                string footerLine1 = "";
+                string footerLine2 = null;
+                int footerLinesCount = 1;
+
+                if (visSingleLen <= frameWidth || footerItems.Length <= 1) {
+                    footerLine1 = singleLineFooter;
+                } else {
+                    footerLinesCount = 2;
+                    int half = (int)Math.Ceiling(footerItems.Length / 2.0);
+                    var r1 = new List<string>();
+                    var r2 = new List<string>();
+                    for (int fi = 0; fi < footerItems.Length; fi++) {
+                        if (fi < half) r1.Add(footerItems[fi]);
+                        else r2.Add(footerItems[fi]);
+                    }
+                    footerLine1 = " " + string.Join("  \x1b[90m│\x1b[0m  ", r1.ToArray());
+                    footerLine2 = " " + string.Join("  \x1b[90m│\x1b[0m  ", r2.ToArray());
+                }
+
+                int totalFooterHeight = 1 + footerLinesCount; // 1 top separator + footerLinesCount menu text lines
+                int maxAvailableRows = height - headerHeight - 2 - totalFooterHeight;
+                if (maxAvailableRows < 1) maxAvailableRows = 1;
+                int currentPageSize = useFixedPageSize ? Math.Min(defaultPageSize, maxAvailableRows) : maxAvailableRows;
 
                 // --- BUILD BUFFER ---
                 StringBuilder sb = new StringBuilder();
@@ -543,33 +601,39 @@ namespace OmniAdmin {
                 if (selectedRow >= itemsOnPage) selectedRow = Math.Max(0, itemsOnPage - 1);
 
                 // 1. Header Border and Text (Including Page Count)
-                string headerColor = "\x1b[36m"; // Cyan
-                if (activeMode == "Services") headerColor = "\x1b[33m"; // Yellow
-                else if (activeMode == "Tasks") headerColor = "\x1b[36m"; // Cyan
-                else if (activeMode == "Users") headerColor = "\x1b[35m"; // Magenta
-                else if (activeMode == "Apps") headerColor = "\x1b[32m"; // Green
-                else if (activeMode == "History") headerColor = "\x1b[94m"; // Bright Blue
+                string themeColor = "\x1b[36;1m"; // Cyan default
+                string themePill  = "\x1b[46;30;1m";
+                if (activeMode == "Services") { themeColor = "\x1b[33;1m"; themePill = "\x1b[43;30;1m"; }
+                else if (activeMode == "Tasks") { themeColor = "\x1b[36;1m"; themePill = "\x1b[46;30;1m"; }
+                else if (activeMode == "Users") { themeColor = "\x1b[35;1m"; themePill = "\x1b[45;30;1m"; }
+                else if (activeMode == "Apps") { themeColor = "\x1b[32;1m"; themePill = "\x1b[42;30;1m"; }
+                else if (activeMode == "History") { themeColor = "\x1b[94;1m"; themePill = "\x1b[44;37;1m"; }
 
                 string titlePage = "";
                 if (activeMode != "SpeedTest") {
-                    titlePage = " - PAGE " + (pageIndex + 1) + "/" + maxPages;
+                    titlePage = string.Format("{0}/{1}", pageIndex + 1, maxPages);
                 }
-                string headerText = " OMNIADMIN - SYSTEM MONITOR - " + activeMode.ToUpper() + titlePage;
-                if (!isLocal) headerText += " (Connected to: " + computerName + ")";
+                
+                string rawTitle = " OMNIADMIN  " + activeMode.ToUpper() + (string.IsNullOrEmpty(titlePage) ? "" : " [" + titlePage + "]") + (isLocal ? "" : " (" + computerName + ")");
+                int headerPad = frameWidth - 8 - rawTitle.Length;
+                if (headerPad < 0) headerPad = 0;
 
-                sb.Append(headerColor + new string('═', frameWidth) + "\x1b[0m\n");
-                sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", headerText.PadRight(frameWidth)) + "\n");
-                sb.Append(headerColor + new string('═', frameWidth) + "\x1b[0m\n");
+                sb.Append(themeColor + "┌─── " + "\x1b[1;97mOMNIADMIN\x1b[0m  " + themePill + " " + activeMode.ToUpper() + " \x1b[0m" + (string.IsNullOrEmpty(titlePage) ? "" : " " + themeColor + "[" + titlePage + "]\x1b[0m") + (isLocal ? "" : " \x1b[90m(" + computerName + ")\x1b[0m") + " " + themeColor + new string('─', headerPad) + "┐\x1b[0m\n");
 
                 // 2. Stats Bar
                 object sysData = syncHash["SysData"];
                 if (staticData != null && sysData != null) {
                     string cpuName = GetString(staticData, "CpuName");
                     string cores = GetString(staticData, "Cores");
-                    sb.Append(string.Format(" CPU: {0} | {1} Cores", cpuName, cores).PadRight(frameWidth) + "\n");
+                    string ansiCPU = string.Format("\x1b[1mCPU\x1b[0m  {0} \x1b[90m│\x1b[0m {1} Cores", cpuName, cores);
+                    sb.Append(FormatBoxLine(ansiCPU, frameWidth, themeColor));
+
                     if (GetProperty(staticData, "GpuName") != null) {
-                        sb.Append(string.Format(" GPU: {0}", GetString(staticData, "GpuName")).PadRight(frameWidth) + "\n");
+                        string gpuName = GetString(staticData, "GpuName");
+                        string ansiGPU = string.Format("\x1b[1mGPU\x1b[0m  {0}", gpuName);
+                        sb.Append(FormatBoxLine(ansiGPU, frameWidth, themeColor));
                     }
+
                     string totalRam = GetString(staticData, "TotalRam");
                     string bootTimeStr = GetString(staticData, "BootTime");
                     string uptimeStr = "";
@@ -578,7 +642,8 @@ namespace OmniAdmin {
                         var span = DateTime.Now - bootTime;
                         uptimeStr = string.Format("{0}d {1}h {2}m", span.Days, span.Hours, span.Minutes);
                     }
-                    sb.Append(string.Format(" RAM: {0} GB Total | Uptime: {1}", totalRam, uptimeStr).PadRight(frameWidth) + "\n");
+                    string ansiRAM = string.Format("\x1b[1mRAM\x1b[0m  {0} GB Total \x1b[90m│\x1b[0m Uptime: {1}", totalRam, uptimeStr);
+                    sb.Append(FormatBoxLine(ansiRAM, frameWidth, themeColor));
 
                     double cpuLoad = GetDouble(sysData, "CpuLoad");
                     double totalSysRam = GetDouble(sysData, "TotalRam");
@@ -590,10 +655,8 @@ namespace OmniAdmin {
                     string cpuBar = GetProgressBar((int)cpuLoad, 20, out cpuColor);
                     string ramBar = GetProgressBar(ramPct, 20, out ramColor);
                     
-                    string visibleLine = string.Format(" CPU: {0} {1,3}%   RAM: {2} {3,3}%", cpuBar, (int)cpuLoad, ramBar, ramPct);
-                    int padSize = frameWidth - visibleLine.Length;
-                    if (padSize < 0) padSize = 0;
-                    sb.Append(string.Format(" CPU: {0}{1}\x1b[0m {2,3}%   RAM: {3}{4}\x1b[0m {5,3}%", cpuColor, cpuBar, (int)cpuLoad, ramColor, ramBar, ramPct) + new string(' ', padSize) + "\n");
+                    string ansiLoad1 = string.Format("\x1b[1mCPU\x1b[0m  {0}{1}\x1b[0m {2,3}%   \x1b[1mRAM\x1b[0m  {3}{4}\x1b[0m {5,3}%", cpuColor, cpuBar, (int)cpuLoad, ramColor, ramBar, ramPct);
+                    sb.Append(FormatBoxLine(ansiLoad1, frameWidth, themeColor));
 
                     double diskLoad = GetDouble(sysData, "DiskLoad");
                     string diskColor;
@@ -604,19 +667,15 @@ namespace OmniAdmin {
                         string gpuColor;
                         string gpuBar = GetProgressBar((int)gpuLoad, 20, out gpuColor);
                         
-                        string visibleGpu = string.Format(" GPU: {0} {1,3}%  DISK: {2} {3,3}%", gpuBar, (int)gpuLoad, diskBar, (int)diskLoad);
-                        int gpuPad = frameWidth - visibleGpu.Length;
-                        if (gpuPad < 0) gpuPad = 0;
-                        sb.Append(string.Format(" GPU: {0}{1}\x1b[0m {2,3}%  DISK: {3}{4}\x1b[0m {5,3}%", gpuColor, gpuBar, (int)gpuLoad, diskColor, diskBar, (int)diskLoad) + new string(' ', gpuPad) + "\n");
+                        string ansiLoad2 = string.Format("\x1b[1mGPU\x1b[0m  {0}{1}\x1b[0m {2,3}%  \x1b[1mDISK\x1b[0m  {3}{4}\x1b[0m {5,3}%", gpuColor, gpuBar, (int)gpuLoad, diskColor, diskBar, (int)diskLoad);
+                        sb.Append(FormatBoxLine(ansiLoad2, frameWidth, themeColor));
                     } else {
-                        string visibleDisk = string.Format(" DISK: {0} {1,3}%", diskBar, (int)diskLoad);
-                        int diskPad = frameWidth - visibleDisk.Length;
-                        if (diskPad < 0) diskPad = 0;
-                        sb.Append(string.Format(" DISK: {0}{1}\x1b[0m {2,3}%", diskColor, diskBar, (int)diskLoad) + new string(' ', diskPad) + "\n");
+                        string ansiLoad2 = string.Format("\x1b[1mDISK\x1b[0m  {0}{1}\x1b[0m {2,3}%", diskColor, diskBar, (int)diskLoad);
+                        sb.Append(FormatBoxLine(ansiLoad2, frameWidth, themeColor));
                     }
 
-                    string netLine = string.Format(" Net: Up: {0} Mbps | Down: {1} Mbps  |  Disk: W:{2} R:{3} MB/s", GetProperty(sysData, "UpMbps"), GetProperty(sysData, "DnMbps"), GetProperty(sysData, "DiskWrite"), GetProperty(sysData, "DiskRead"));
-                    sb.Append(netLine.PadRight(frameWidth) + "\n");
+                    string ansiNet = string.Format("\x1b[1mNET\x1b[0m  Up: {0} Mbps \x1b[90m│\x1b[0m Dn: {1} Mbps  \x1b[90m│\x1b[0m  \x1b[1mIO\x1b[0m  Write: {2} MB/s \x1b[90m│\x1b[0m Read: {3} MB/s", GetProperty(sysData, "UpMbps"), GetProperty(sysData, "DnMbps"), GetProperty(sysData, "DiskWrite"), GetProperty(sysData, "DiskRead"));
+                    sb.Append(FormatBoxLine(ansiNet, frameWidth, themeColor));
 
                     int pCount = 0;
                     var procObj = GetProperty(sysData, "Processes");
@@ -628,29 +687,29 @@ namespace OmniAdmin {
                     int uCount = 0;
                     var userDataList = Unwrap(syncHash["UserData"]) as ICollection;
                     if (userDataList != null) uCount = userDataList.Count;
-                    string procLine = string.Format(" Processes: {0}  |  Threads: {1}  |  Users: {2}", pCount, tCount, uCount);
-                    sb.Append(procLine.PadRight(frameWidth) + "\n");
+                    string ansiSys = string.Format("\x1b[1mSYS\x1b[0m  Processes: {0} \x1b[90m│\x1b[0m Threads: {1} \x1b[90m│\x1b[0m Users: {2}", pCount, tCount, uCount);
+                    sb.Append(FormatBoxLine(ansiSys, frameWidth, themeColor));
 
                     string actionStatus = GetString(syncHash["ActionStatus"]);
                     string error = GetString(syncHash["Error"]);
                     if (!string.IsNullOrEmpty(actionStatus)) {
-                        // Truncate to frameWidth-2 before padding to prevent buffer overflow from long messages
-                        string statusLine = string.Format("  {0}", actionStatus);
-                        if (statusLine.Length > frameWidth - 1) statusLine = statusLine.Substring(0, frameWidth - 4) + "...";
-                        sb.Append(statusLine.PadRight(frameWidth) + "\n");
+                        string visSt = actionStatus.Length <= frameWidth - 4 ? actionStatus : actionStatus.Substring(0, frameWidth - 7) + "...";
+                        string ansiSt = "\x1b[36;1m" + visSt + "\x1b[0m";
+                        sb.Append(FormatBoxLine(ansiSt, frameWidth, themeColor));
                     } else if (!string.IsNullOrEmpty(error)) {
-                        sb.Append(string.Format("  {0}", error).PadRight(frameWidth) + "\n");
+                        string visErr = error.Length <= frameWidth - 4 ? error : error.Substring(0, frameWidth - 7) + "...";
+                        string ansiErr = "\x1b[31;1m" + visErr + "\x1b[0m";
+                        sb.Append(FormatBoxLine(ansiErr, frameWidth, themeColor));
                     } else {
-                        sb.Append(" ".PadRight(frameWidth) + "\n");
+                        sb.Append(FormatBoxLine("", frameWidth, themeColor));
                     }
                 } else {
-                    // Fallback empty spacer lines to keep layout height consistent if stats data isn't loaded yet
                     int lines = (staticData != null && GetProperty(staticData, "GpuName") != null) ? 10 : 7;
                     for (int l = 0; l < lines; l++) {
-                        sb.Append(" ".PadRight(frameWidth) + "\n");
+                        sb.Append(FormatBoxLine("", frameWidth, themeColor));
                     }
                 }
-                sb.Append("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
+                sb.Append(themeColor + "└" + new string('─', frameWidth - 2) + "┘\x1b[0m\n");
 
                 // --- DRAW VIEWPORT PAGE CONTENT ---
                 if (activeMode == "SpeedTest") {
@@ -794,8 +853,8 @@ namespace OmniAdmin {
                         string fmt = "{0," + colAligns[i] + colWidths[i] + "}";
                         string cell = string.Format(fmt, hText);
                         
-                        if (i == selColIndex) sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", cell));
-                        else sb.Append(string.Format("\x1b[90m{0}\x1b[0m", cell));
+                        if (i == selColIndex) sb.Append(string.Format("{0}{1}\x1b[0m", themePill, cell));
+                        else sb.Append(string.Format("\x1b[1;37m{0}\x1b[0m", cell));
                         
                         if (i < colHeaders.Length - 1) {
                             sb.Append("\x1b[90m│\x1b[0m");
@@ -905,7 +964,7 @@ namespace OmniAdmin {
                                 else fg = "\x1b[90m"; // Gray
                                 
                                 if (paused && i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[30;42m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("{0}{1}\x1b[0m", fg, line.PadRight(frameWidth)) + "\n");
                                 }
@@ -930,7 +989,7 @@ namespace OmniAdmin {
                                 else fg = "\x1b[33m"; // Yellow
                                 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("{0}{1}\x1b[0m", fg, line.PadRight(frameWidth)) + "\n");
                                 }
@@ -960,7 +1019,7 @@ namespace OmniAdmin {
                                 else fg = "\x1b[90m"; // Gray
                                 
                                 if (i == selectedRow && !showTaskProps) {
-                                    sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     string resColor = (res == "0") ? "\x1b[32m" : "\x1b[31m"; // Green for 0, Red for others
                                     int sepIdx = line.LastIndexOf('│');
@@ -989,7 +1048,7 @@ namespace OmniAdmin {
                                 line = line.PadRight(frameWidth).Substring(0, frameWidth);
                                 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line) + "\n");
                                 }
@@ -1013,7 +1072,7 @@ namespace OmniAdmin {
                                 if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
                                 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
                                 }
@@ -1044,7 +1103,7 @@ namespace OmniAdmin {
                                 if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
                                 }
@@ -1055,9 +1114,8 @@ namespace OmniAdmin {
                         rowsDrawn++;
                     }
                     
-                    // Draw filler rows to maintain grid size exactly.
-                    // For History mode: if there's an error, show it word-wrapped in the empty rows.
-                    int empty = currentPageSize - rowsDrawn;
+                    // Draw filler rows to maintain grid size exactly and push footer to bottom of screen.
+                    int empty = maxAvailableRows - rowsDrawn;
                     string historyError = activeMode == "History" ? GetString(syncHash["HistoryError"]) : "";
                     if (!string.IsNullOrEmpty(historyError) && empty > 0) {
                         int lineW = frameWidth - 4;
@@ -1082,6 +1140,10 @@ namespace OmniAdmin {
                         for (int x = linesWritten; x < empty; x++) {
                             sb.Append(" ".PadRight(frameWidth) + "\n");
                         }
+                    } else if (empty > 0) {
+                        for (int x = 0; x < empty; x++) {
+                            sb.Append(" ".PadRight(frameWidth) + "\n");
+                        }
                     }
                 }
                 }
@@ -1089,43 +1151,14 @@ namespace OmniAdmin {
                 // 3. Footer Separator and Menu Bar
                 sb.Append("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
 
-                string footerText = "";
-                if (activeMode == "Processes") footerText = " [S] Search  |  [1-6] Sort  |  [K] Kill  |  [<-/->] Page  |  [P] Pause/Resume  |  [M] Menu  |  [Q] Quit ";
-                else if (activeMode == "Services") footerText = " [S] Search  |  [P] Props  |  [T] Start/Stop  |  [R] Restart  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
-                else if (activeMode == "Tasks") footerText = " [S] Search  |  [T] Toggle Run  |  [P] Props  |  [1-4] Sort  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
-                else if (activeMode == "Apps") footerText = " [S] Search  |  [1-5] Sort  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
-                else if (activeMode == "Users") footerText = " [S] Search  |  [L] Logoff User  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
-                else if (activeMode == "SpeedTest") footerText = " [UpDown] Select Field  |  [<-/->] Adjust  |  [Enter] Edit/Start  |  [M] Menu  |  [ESC] Back ";
-                else if (activeMode == "History") {
-                    if (!historyConfigured)
-                        footerText = " [1] 1 Day  [2] 7 Days  [3] 14 Days  [4] 30 Days  [5] 90 Days  [C] Custom  |  [M] Menu  |  [ESC] Back ";
-                    else
-                        footerText = " [S] Search  |  [1-5] Sort  |  [Enter] Details  |  [R] Change Days  |  [<-/->] Page  |  [M] Menu  |  [ESC] Back ";
-                }
-
-                string footerBg = "\x1b[40m"; // Black background
-                string footerFg = "\x1b[36m"; // Cyan text
-                if (activeMode == "SpeedTest" && ToBool(st["Running"])) {
-                    footerText = " Testing in progress... Please do not close or resize the terminal. ";
-                    footerFg = "\x1b[33m"; // Yellow
-                }
-
-                // Wrap or trim footer if wider than console width
-                if (footerText.Length < (frameWidth - 2)) {
-                    sb.Append(string.Format("{0}{1}{2}\x1b[0m", footerBg, footerFg, footerText.PadRight(frameWidth)) + "\n");
-                    sb.Append("\x1b[90m" + new string('═', frameWidth) + "\x1b[0m");
+                if (footerLinesCount == 1) {
+                    int pad1 = frameWidth - GetVisibleLength(footerLine1);
+                    sb.Append(footerLine1 + new string(' ', Math.Max(0, pad1)));
                 } else {
-                    int cutoff = frameWidth - 2;
-                    int splitIdx = footerText.LastIndexOf("|", cutoff);
-                    if (splitIdx > 0) {
-                        string line1 = footerText.Substring(0, splitIdx).Trim();
-                        string line2 = footerText.Substring(splitIdx).Trim();
-                        sb.Append(string.Format("{0}{1}{2}\x1b[0m", footerBg, footerFg, line1.PadRight(frameWidth)) + "\n");
-                        sb.Append(string.Format("{0}{1}{2}\x1b[0m", footerBg, footerFg, line2.PadRight(frameWidth)));
-                    } else {
-                        sb.Append(string.Format("{0}{1}{2}\x1b[0m", footerBg, footerFg, footerText.Substring(0, cutoff).PadRight(frameWidth)) + "\n");
-                        sb.Append("\x1b[90m" + new string('═', frameWidth) + "\x1b[0m");
-                    }
+                    int pad1 = frameWidth - GetVisibleLength(footerLine1);
+                    sb.Append(footerLine1 + new string(' ', Math.Max(0, pad1)) + "\n");
+                    int pad2 = frameWidth - GetVisibleLength(footerLine2);
+                    sb.Append(footerLine2 + new string(' ', Math.Max(0, pad2)));
                 }
 
                 // --- OVERLAYS AND DIALOG BOXES ---
