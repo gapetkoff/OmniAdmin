@@ -1,4 +1,4 @@
-﻿function Invoke-SystemMonitorWorker {
+function Invoke-SystemMonitorWorker {
     param($Sync)
     
     $Session = $null
@@ -344,16 +344,25 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
                 }
 
                 $ServiceHostMap = @{}
+                $ProcessMap = @{}
                 if ($DoSvcHost) {
                     try {
                         $RunningServices = Get-CimInstance Win32_Service -Filter "State='Running' and ProcessId > 0" -ErrorAction SilentlyContinue
                         foreach ($Svc in $RunningServices) {
                             $SvcPid = [int]$Svc.ProcessId
-                            $SvcName = [string]$Svc.Name
+                            $SvcDisp = if ($Svc.DisplayName) { [string]$Svc.DisplayName } else { [string]$Svc.Name }
                             if (-not $ServiceHostMap.ContainsKey($SvcPid)) {
                                 $ServiceHostMap[$SvcPid] = @()
                             }
-                            $ServiceHostMap[$SvcPid] += $SvcName
+                            $ServiceHostMap[$SvcPid] += $SvcDisp
+                        }
+                    } catch {}
+
+                    try {
+                        Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+                            if ($_.Description -and $_.Description -ne $_.ProcessName) {
+                                $ProcessMap[$_.Id] = [string]$_.Description
+                            }
                         }
                     } catch {}
                 }
@@ -382,6 +391,7 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
                     DebugStr  = $DebugStr
                     ThreadCount = $ThreadCnt
                     ServiceHostMap = $ServiceHostMap
+                    ProcessMap     = $ProcessMap
                 }
             } -Arguments $ArgsArray
 
@@ -395,9 +405,10 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
             # FORCE UPDATE SHARED MEMORY
             if ($Result.UserList) { $Sync.UserData = @($Result.UserList) }
             if ($Result.SvcList) { $Sync.ServiceData = @($Result.SvcList) }
-            if ($Result.TaskList) { $Sync.TaskData = @($Result.TaskList) }
+            if ($Result.TaskList) { $Sync.TaskData = @($Result.TaskData) }
             if ($Result.AppList) { $Sync.AppData = @($Result.AppList) }
             if ($DoSvcHost -and $Result.ServiceHostMap) { $Sync.ServiceHostMap = $Result.ServiceHostMap }
+            if ($DoSvcHost -and $Result.ProcessMap) { $Sync.ProcessMap = $Result.ProcessMap }
             
             if ($Result.DebugStr) { $Sync.DebugLog = $Result.DebugStr }
             

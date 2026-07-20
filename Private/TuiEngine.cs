@@ -53,6 +53,20 @@ namespace OmniAdmin {
             return val != null ? val.ToString() : "";
         }
 
+        public static string GetServiceHostString(object servicesObj) {
+            if (servicesObj == null) return "";
+            servicesObj = Unwrap(servicesObj);
+            if (servicesObj is string) return (string)servicesObj;
+            if (servicesObj is IEnumerable) {
+                var list = new List<string>();
+                foreach (var s in (IEnumerable)servicesObj) {
+                    if (s != null) list.Add(Unwrap(s).ToString());
+                }
+                return string.Join(", ", list);
+            }
+            return servicesObj.ToString();
+        }
+
         public static string GetString(object obj, string name) {
             var val = GetProperty(obj, name);
             return val != null ? val.ToString() : "";
@@ -408,12 +422,27 @@ namespace OmniAdmin {
                 if (activeMode == "Processes") {
                     colHeaders = new string[] { "PID (1)", "Name (2)", "CPU(%) (3)", "RAM(MB) (4)", "Threads (5)", "Handles (6)" };
                     colProps = new string[] { "IDProcess", "Name", "PercentProcessorTime", "WorkingSet", "ThreadCount", "HandleCount" };
-                    colWidths = new int[] { 9, frameWidth - 61, 11, 11, 11, 12 };
+                    colWidths = new int[] { 9, Math.Max(10, frameWidth - 61), 11, 11, 11, 12 };
                     colAligns = new string[] { "-", "-", "", "", "", "" };
                     var raw = (paused ? frozenProcessList : GetProcessList(syncHash));
                     if (raw != null) {
                         if (!string.IsNullOrEmpty(filterText)) {
-                            raw = raw.FindAll(p => GetString(p, "Name").IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0);
+                            var serviceHostMap = syncHash["ServiceHostMap"] as IDictionary;
+                            var processMap = syncHash["ProcessMap"] as IDictionary;
+                            raw = raw.FindAll(p => {
+                                string pNameStr = GetString(p, "Name");
+                                if (pNameStr.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                                int pidVal = GetInt(p, "IDProcess");
+                                if (serviceHostMap != null && serviceHostMap.Contains(pidVal)) {
+                                    string svcStr = GetServiceHostString(serviceHostMap[pidVal]);
+                                    if (svcStr.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                                }
+                                if (processMap != null && processMap.Contains(pidVal)) {
+                                    string procStr = GetString(processMap[pidVal]);
+                                    if (procStr.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                                }
+                                return false;
+                            });
                         }
                         listToRender = GetSortedList(raw, colProps[selColIndex], isDesc);
                     }
@@ -421,7 +450,7 @@ namespace OmniAdmin {
                 else if (activeMode == "Services") {
                     colHeaders = new string[] { "Status (1)", "Name (2)", "Display Name (3)", "Type (4)" };
                     colProps = new string[] { "Status", "Name", "DisplayName", "StartType" };
-                    int avail = Math.Max(10, frameWidth - 27);
+                    int avail = Math.Max(10, frameWidth - 26);
                     int nameW = avail / 2;
                     colWidths = new int[] { 11, nameW, avail - nameW, 10 };
                     colAligns = new string[] { "-", "-", "-", "-" };
@@ -436,7 +465,7 @@ namespace OmniAdmin {
                 else if (activeMode == "Tasks") {
                     colHeaders = new string[] { "State (1)", "Task Name (2)", "Last Run Time (3)", "Result (4)" };
                     colProps = new string[] { "State", "TaskName", "LastRunTime", "LastTaskResult" };
-                    int avail = frameWidth - 28;
+                    int avail = Math.Max(10, frameWidth - 27);
                     int nameW = (int)Math.Floor(avail * 0.55);
                     colWidths = new int[] { 11, nameW, avail - nameW, 11 };
                     colAligns = new string[] { "-", "-", "-", "-" };
@@ -451,7 +480,7 @@ namespace OmniAdmin {
                 else if (activeMode == "Apps") {
                     colHeaders = new string[] { "Name (1)", "Version (2)", "Publisher (3)", "Type (4)", "Date (5)" };
                     colProps = new string[] { "DisplayName", "DisplayVersion", "Publisher", "AppType", "InstallDate" };
-                    int avail = Math.Max(20, frameWidth - 42);
+                    int avail = Math.Max(20, frameWidth - 43);
                     int nameW = (int)Math.Floor(avail * 0.6);
                     colWidths = new int[] { nameW, 15, avail - nameW, 10, 12 };
                     colAligns = new string[] { "-", "-", "-", "-", "-" };
@@ -466,7 +495,8 @@ namespace OmniAdmin {
                 else if (activeMode == "Users") {
                     colHeaders = new string[] { "USER (1)", "SESSION (2)", "ID (3)", "STATE (4)", "IDLE (5)", "LOGON TIME (6)" };
                     colProps = new string[] { "UserName", "SessionName", "SessionId", "State", "IdleTime", "LogonTime" };
-                    colWidths = new int[] { 20, 15, 10, 12, 15, 20 };
+                    int logonW = Math.Max(10, frameWidth - 7 - 20 - 15 - 10 - 12 - 15);
+                    colWidths = new int[] { 20, 15, 10, 12, 15, logonW };
                     colAligns = new string[] { "-", "-", "-", "-", "-", "-" };
                     var raw = GetUserList(syncHash);
                     if (raw != null) {
@@ -479,9 +509,10 @@ namespace OmniAdmin {
                 else if (activeMode == "History") {
                     colHeaders = new string[] { "Time (1)", "User (2)", "Browser (3)", "Title (4)", "URL (5)" };
                     colProps = new string[] { "Time", "User", "Browser", "Title", "URL" };
-                    colWidths = new int[] { 22, 11, 12, (int)Math.Floor((frameWidth - 45) * 0.45), (int)Math.Floor((frameWidth - 45) * 0.55) };
-                    // ensure exact sum to frameWidth to prevent horizontal scrollbar or line wraps
-                    colWidths[4] = frameWidth - colWidths[0] - colWidths[1] - colWidths[2] - colWidths[3];
+                    int avail = Math.Max(20, frameWidth - 51);
+                    int titleW = (int)Math.Floor(avail * 0.45);
+                    int urlW = avail - titleW;
+                    colWidths = new int[] { 22, 11, 12, titleW, urlW };
                     colAligns = new string[] { "-", "-", "-", "-", "-" };
                     
                     var raw = historyList;
@@ -578,7 +609,12 @@ namespace OmniAdmin {
                     string netLine = string.Format(" Net: Up: {0} Mbps | Down: {1} Mbps  |  Disk: W:{2} R:{3} MB/s", GetProperty(sysData, "UpMbps"), GetProperty(sysData, "DnMbps"), GetProperty(sysData, "DiskWrite"), GetProperty(sysData, "DiskRead"));
                     sb.Append(netLine.PadRight(frameWidth) + "\n");
 
-                    int pCount = GetInt(sysData, "Processes");
+                    int pCount = 0;
+                    var procObj = GetProperty(sysData, "Processes");
+                    if (procObj != null) {
+                        var procColl = Unwrap(procObj) as ICollection;
+                        if (procColl != null) pCount = procColl.Count;
+                    }
                     int tCount = GetInt(sysData, "ThreadCount");
                     int uCount = 0;
                     var userDataList = Unwrap(syncHash["UserData"]) as ICollection;
@@ -792,32 +828,36 @@ namespace OmniAdmin {
                             
                             if (activeMode == "Processes") {
                                 string pName = GetString(item, "Name");
-                                if (pName.StartsWith("svchost", StringComparison.OrdinalIgnoreCase)) {
-                                    pName = System.Text.RegularExpressions.Regex.Replace(pName, @"#\d+$", "");
-                                    int pid = GetInt(item, "IDProcess");
+                                string baseName = System.Text.RegularExpressions.Regex.Replace(pName, @"#\d+$", "");
+                                int pid = GetInt(item, "IDProcess");
+
+                                pName = baseName;
+                                if (baseName.StartsWith("svchost", StringComparison.OrdinalIgnoreCase)) {
                                     var serviceHostMap = syncHash["ServiceHostMap"] as IDictionary;
                                     if (serviceHostMap != null && serviceHostMap.Contains(pid)) {
-                                        var servicesObj = serviceHostMap[pid];
-                                        if (servicesObj != null) {
-                                            servicesObj = Unwrap(servicesObj);
-                                            string servicesStr = "";
-                                            if (servicesObj is string) {
-                                                servicesStr = (string)servicesObj;
-                                            } else if (servicesObj is IEnumerable) {
-                                                var list = new List<string>();
-                                                foreach (var s in (IEnumerable)servicesObj) {
-                                                    if (s != null) {
-                                                        list.Add(Unwrap(s).ToString());
-                                                    }
-                                                }
-                                                servicesStr = string.Join(", ", list);
-                                            } else {
-                                                servicesStr = servicesObj.ToString();
-                                            }
-
-                                            if (!string.IsNullOrEmpty(servicesStr)) {
-                                                pName = string.Format("{0} ({1})", pName, servicesStr);
-                                            }
+                                        string servicesStr = GetServiceHostString(serviceHostMap[pid]);
+                                        if (!string.IsNullOrEmpty(servicesStr)) {
+                                            pName = string.Format("{0} ({1})", baseName, servicesStr);
+                                        }
+                                    }
+                                }
+                                else if (baseName.IndexOf("webview", StringComparison.OrdinalIgnoreCase) >= 0 || baseName.IndexOf("msedge", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                    string desc = "";
+                                    var processMap = syncHash["ProcessMap"] as IDictionary;
+                                    if (processMap != null && processMap.Contains(pid)) {
+                                        desc = GetString(processMap[pid]);
+                                    }
+                                    if (string.IsNullOrEmpty(desc) || desc.Equals(baseName, StringComparison.OrdinalIgnoreCase)) {
+                                        desc = "Microsoft Edge WebView2";
+                                    }
+                                    pName = string.Format("{0} ({1})", baseName, desc);
+                                }
+                                else {
+                                    var processMap = syncHash["ProcessMap"] as IDictionary;
+                                    if (processMap != null && processMap.Contains(pid)) {
+                                        string desc = GetString(processMap[pid]);
+                                        if (!string.IsNullOrEmpty(desc) && !desc.Equals(baseName, StringComparison.OrdinalIgnoreCase)) {
+                                            pName = string.Format("{0} ({1})", baseName, desc);
                                         }
                                     }
                                 }

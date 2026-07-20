@@ -1,4 +1,4 @@
-﻿function Out-ProcessGrid {
+function Out-ProcessGrid {
     param(
         [array]$ProcessList,
         [Parameter(Mandatory=$true)][int]$SelectedRow,
@@ -63,6 +63,9 @@
                             $NameVal = "$NameVal ($ServiceNames)"
                         }
                     }
+                }
+                elseif ($NameVal -like "*webview*" -or $NameVal -like "*msedge*") {
+                    $NameVal = "$NameVal (Microsoft Edge WebView2)"
                 }
                 if ($NameVal.Length -gt $NameW) { $NameVal = $NameVal.SubString(0, $NameW) }
                 
