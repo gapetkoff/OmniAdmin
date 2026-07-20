@@ -368,15 +368,17 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
                 }
 
                 # V71: Safety clamps on total system stats to avoid overflow anomalies
-                $SafeCpuLoad = if ($CpuTotal) { [math]::Min(100, [math]::Max(0, [math]::Round([double]$CpuTotal.PercentProcessorTime))) } else { 0 }
-                $SafeDiskR   = if ($DiskIO) { [math]::Round([double]$DiskIO.DiskReadBytesPersec / 1MB, 1) } else { 0 }
-                $SafeDiskW   = if ($DiskIO) { [math]::Round([double]$DiskIO.DiskWriteBytesPersec / 1MB, 1) } else { 0 }
+                $SafeCpuLoad  = if ($CpuTotal) { [math]::Min(100, [math]::Max(0, [math]::Round([double]$CpuTotal.PercentProcessorTime))) } else { 0 }
+                $SafeDiskLoad = if ($DiskIO) { [math]::Min(100, [math]::Max(0, [math]::Round([double]$DiskIO.PercentDiskTime))) } else { 0 }
+                $SafeDiskR    = if ($DiskIO) { [math]::Round([double]$DiskIO.DiskReadBytesPersec / 1MB, 1) } else { 0 }
+                $SafeDiskW    = if ($DiskIO) { [math]::Round([double]$DiskIO.DiskWriteBytesPersec / 1MB, 1) } else { 0 }
                 # Compute thread count from the process data we already have (avoids a second expensive WMI call)
                 $ThreadCnt = if ($Procs) { ($Procs | Measure-Object -Property ThreadCount -Sum).Sum } else { 0 }
 
                 [PSCustomObject]@{
                     CpuLoad   = $SafeCpuLoad
                     GpuLoad   = [math]::Round([double]$GpuLoad)
+                    DiskLoad  = $SafeDiskLoad
                     TotalRam  = [math]::Round([double]$RAM.TotalVisibleMemorySize / 1024)
                     FreeRam   = [math]::Round([double]$RAM.FreePhysicalMemory / 1024)
                     UpMbps    = [math]::Round(([double]$TotalSent * 8) / 1000000, 1)

@@ -590,20 +590,29 @@ namespace OmniAdmin {
                     string cpuBar = GetProgressBar((int)cpuLoad, 20, out cpuColor);
                     string ramBar = GetProgressBar(ramPct, 20, out ramColor);
                     
-                    string visibleLine = string.Format(" CPU: {0} {1}%  RAM: {2} {3}%", cpuBar, (int)cpuLoad, ramBar, ramPct);
+                    string visibleLine = string.Format(" CPU: {0} {1,3}%   RAM: {2} {3,3}%", cpuBar, (int)cpuLoad, ramBar, ramPct);
                     int padSize = frameWidth - visibleLine.Length;
                     if (padSize < 0) padSize = 0;
-                    sb.Append(string.Format(" CPU: {0}{1}\x1b[0m {2}%  RAM: {3}{4}\x1b[0m {5}%", cpuColor, cpuBar, (int)cpuLoad, ramColor, ramBar, ramPct) + new string(' ', padSize) + "\n");
+                    sb.Append(string.Format(" CPU: {0}{1}\x1b[0m {2,3}%   RAM: {3}{4}\x1b[0m {5,3}%", cpuColor, cpuBar, (int)cpuLoad, ramColor, ramBar, ramPct) + new string(' ', padSize) + "\n");
+
+                    double diskLoad = GetDouble(sysData, "DiskLoad");
+                    string diskColor;
+                    string diskBar = GetProgressBar((int)diskLoad, 20, out diskColor);
 
                     if (GetProperty(staticData, "GpuName") != null) {
                         double gpuLoad = GetDouble(sysData, "GpuLoad");
                         string gpuColor;
                         string gpuBar = GetProgressBar((int)gpuLoad, 20, out gpuColor);
                         
-                        string visibleGpu = string.Format(" GPU: {0} {1}%", gpuBar, (int)gpuLoad);
+                        string visibleGpu = string.Format(" GPU: {0} {1,3}%  DISK: {2} {3,3}%", gpuBar, (int)gpuLoad, diskBar, (int)diskLoad);
                         int gpuPad = frameWidth - visibleGpu.Length;
                         if (gpuPad < 0) gpuPad = 0;
-                        sb.Append(string.Format(" GPU: {0}{1}\x1b[0m {2}%", gpuColor, gpuBar, (int)gpuLoad) + new string(' ', gpuPad) + "\n");
+                        sb.Append(string.Format(" GPU: {0}{1}\x1b[0m {2,3}%  DISK: {3}{4}\x1b[0m {5,3}%", gpuColor, gpuBar, (int)gpuLoad, diskColor, diskBar, (int)diskLoad) + new string(' ', gpuPad) + "\n");
+                    } else {
+                        string visibleDisk = string.Format(" DISK: {0} {1,3}%", diskBar, (int)diskLoad);
+                        int diskPad = frameWidth - visibleDisk.Length;
+                        if (diskPad < 0) diskPad = 0;
+                        sb.Append(string.Format(" DISK: {0}{1}\x1b[0m {2,3}%", diskColor, diskBar, (int)diskLoad) + new string(' ', diskPad) + "\n");
                     }
 
                     string netLine = string.Format(" Net: Up: {0} Mbps | Down: {1} Mbps  |  Disk: W:{2} R:{3} MB/s", GetProperty(sysData, "UpMbps"), GetProperty(sysData, "DnMbps"), GetProperty(sysData, "DiskWrite"), GetProperty(sysData, "DiskRead"));
