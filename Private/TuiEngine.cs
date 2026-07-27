@@ -4,10 +4,84 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Management.Automation;
+using System.Runtime.InteropServices;
 
 namespace OmniAdmin {
+    public enum InputEventType {
+        None,
+        Key,
+        MouseClick,
+        MouseRightClick,
+        MouseDoubleClick,
+        MouseScrollUp,
+        MouseScrollDown,
+        MouseMove
+    }
+
+    public class UserInputEvent {
+        public InputEventType Type = InputEventType.None;
+        public ConsoleKeyInfo KeyInfo;
+        public int MouseX;
+        public int MouseY;
+        public bool LeftButton;
+        public bool RightButton;
+    }
+
     public class TuiEngine {
-        // --- WIN32 CONSOLE API FOR SCROLLBAR STABILITY ---
+        // --- WIN32 CONSOLE API FOR MOUSE & SCROLLBAR ---
+        [StructLayout(LayoutKind.Explicit)]
+        public struct INPUT_RECORD {
+            [FieldOffset(0)] public ushort EventType;
+            [FieldOffset(4)] public KEY_EVENT_RECORD KeyEvent;
+            [FieldOffset(4)] public MOUSE_EVENT_RECORD MouseEvent;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KEY_EVENT_RECORD {
+            public int bKeyDown;
+            public ushort wRepeatCount;
+            public ushort wVirtualKeyCode;
+            public ushort wVirtualScanCode;
+            public char UnicodeChar;
+            public uint dwControlKeyState;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct COORD {
+            public short X;
+            public short Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MOUSE_EVENT_RECORD {
+            public COORD dwMousePosition;
+            public uint dwButtonState;
+            public uint dwControlKeyState;
+            public uint dwEventFlags;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetConsoleMode(IntPtr hConsoleInput, out uint lpMode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetConsoleMode(IntPtr hConsoleInput, uint dwMode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool PeekConsoleInput(IntPtr hConsoleInput, [Out] INPUT_RECORD[] lpBuffer, uint nLength, out uint lpNumberOfEventsRead);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool ReadConsoleInput(IntPtr hConsoleInput, [Out] INPUT_RECORD[] lpBuffer, uint nLength, out uint lpNumberOfEventsRead);
+
+        public const int STD_INPUT_HANDLE = -10;
+        public const uint ENABLE_MOUSE_INPUT = 0x0010;
+        public const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+        public const uint ENABLE_WINDOW_INPUT = 0x0008;
+        public const uint ENABLE_PROCESSED_INPUT = 0x0001;
+        public const uint ENABLE_QUICK_EDIT_MODE = 0x0040;
+
         public static string GetProgressBar(int percent, int width, out string colorAnsi) {
             int filled = (int)Math.Round((percent / 100.0) * width);
             if (filled < 0) filled = 0;
@@ -31,6 +105,38 @@ namespace OmniAdmin {
         public static int GetVisibleLength(string text) {
             if (string.IsNullOrEmpty(text)) return 0;
             return System.Text.RegularExpressions.Regex.Replace(text, @"\x1b\[[0-9;]*m", "").Length;
+        }
+
+        public static string TruncateAnsi(string ansiText, int maxVisWidth) {
+            if (string.IsNullOrEmpty(ansiText) || maxVisWidth <= 0) return "";
+            StringBuilder result = new StringBuilder();
+            int visCount = 0;
+            bool inEscape = false;
+            for (int i = 0; i < ansiText.Length; i++) {
+                char c = ansiText[i];
+                if (c == '\x1b') {
+                    inEscape = true;
+                    result.Append(c);
+                } else if (inEscape) {
+                    result.Append(c);
+                    if (c == 'm' || c == 'H' || c == 'J' || c == 'K') inEscape = false;
+                } else {
+                    if (visCount >= maxVisWidth) break;
+                    result.Append(c);
+                    visCount++;
+                }
+            }
+            result.Append("\x1b[0m");
+            return result.ToString();
+        }
+
+        public static string CenterAnsi(string ansiText, int width) {
+            int visLen = GetVisibleLength(ansiText);
+            int totalPad = width - visLen;
+            if (totalPad <= 0) return TruncateAnsi(ansiText, width);
+            int leftPad = totalPad / 2;
+            int rightPad = totalPad - leftPad;
+            return TruncateAnsi(new string(' ', leftPad) + ansiText + new string(' ', rightPad), width);
         }
 
         // --- DYNAMIC PROPERTY READERS (Supports Hashtable, PSObject, Reflection) ---
@@ -159,6 +265,127 @@ namespace OmniAdmin {
             return sorted;
         }
 
+        // --- UNIFIED INPUT EVENT FETCHING (KEYBOARD + WIN32 & VT MOUSE) ---
+        public static List<UserInputEvent> FetchInputEvents(IntPtr hInput, bool hasConsoleMode) {
+            var events = new List<UserInputEvent>();
+
+            // 1. Read Win32 Console Input Records
+            if (hasConsoleMode && hInput != IntPtr.Zero && hInput != (IntPtr)(-1)) {
+                uint numRead = 0;
+                INPUT_RECORD[] records = new INPUT_RECORD[32];
+                if (PeekConsoleInput(hInput, records, 32, out numRead) && numRead > 0) {
+                    ReadConsoleInput(hInput, records, numRead, out numRead);
+                    for (uint i = 0; i < numRead; i++) {
+                        var rec = records[i];
+                        if (rec.EventType == 0x0001) { // KEY_EVENT
+                            if (rec.KeyEvent.bKeyDown != 0) {
+                                ushort vk = rec.KeyEvent.wVirtualKeyCode;
+                                char ch = rec.KeyEvent.UnicodeChar;
+                                uint ctrl = rec.KeyEvent.dwControlKeyState;
+                                bool shift = (ctrl & 0x0010) != 0;
+                                bool alt = (ctrl & (0x0001 | 0x0002)) != 0;
+                                bool control = (ctrl & (0x0004 | 0x0008)) != 0;
+
+                                var keyInfo = new ConsoleKeyInfo(ch, (ConsoleKey)vk, shift, alt, control);
+                                var keyEvt = new UserInputEvent();
+                                keyEvt.Type = InputEventType.Key;
+                                keyEvt.KeyInfo = keyInfo;
+                                events.Add(keyEvt);
+                            }
+                        }
+                        else if (rec.EventType == 0x0002) { // MOUSE_EVENT
+                            var m = rec.MouseEvent;
+                            var evt = new UserInputEvent();
+                            int winTop = 0;
+                            try { winTop = Console.WindowTop; } catch {}
+                            evt.MouseX = m.dwMousePosition.X;
+                            evt.MouseY = Math.Max(0, m.dwMousePosition.Y - winTop - 1);
+                            evt.LeftButton = (m.dwButtonState & 0x0001) != 0;
+                            evt.RightButton = (m.dwButtonState & 0x0002) != 0;
+
+                            if ((m.dwEventFlags & 0x0004) != 0) { // WHEEL_MOVED
+                                int delta = (int)m.dwButtonState >> 16;
+                                evt.Type = delta > 0 ? InputEventType.MouseScrollUp : InputEventType.MouseScrollDown;
+                            } else if ((m.dwEventFlags & 0x0002) != 0) { // DOUBLE_CLICK
+                                evt.Type = InputEventType.MouseDoubleClick;
+                            } else if ((m.dwEventFlags & 0x0001) != 0) { // MOVED
+                                evt.Type = InputEventType.MouseMove;
+                            } else {
+                                if (evt.RightButton) {
+                                    evt.Type = InputEventType.MouseRightClick;
+                                } else if (evt.LeftButton) {
+                                    evt.Type = InputEventType.MouseClick;
+                                }
+                            }
+                            if (evt.Type != InputEventType.None) {
+                                events.Add(evt);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Read standard Console input stream or VT ANSI SGR mouse sequences
+            while (Console.KeyAvailable) {
+                var ki = Console.ReadKey(true);
+                if (ki.KeyChar == '\x1b') {
+                    int waited = 0;
+                    while (!Console.KeyAvailable && waited < 15) {
+                        Thread.Sleep(2);
+                        waited += 2;
+                    }
+                    if (Console.KeyAvailable) {
+                        StringBuilder seq = new StringBuilder();
+                        seq.Append('\x1b');
+                        while (Console.KeyAvailable) {
+                            var nextKi = Console.ReadKey(true);
+                            seq.Append(nextKi.KeyChar);
+                            if (nextKi.KeyChar == 'M' || nextKi.KeyChar == 'm' || seq.Length > 20) break;
+                        }
+                        string str = seq.ToString();
+                        if (str.StartsWith("\x1b[<") && (str.EndsWith("m") || str.EndsWith("M"))) {
+                            try {
+                                string inner = str.Substring(3, str.Length - 4);
+                                string[] parts = inner.Split(';');
+                                if (parts.Length == 3) {
+                                    int b = int.Parse(parts[0]);
+                                    int x = int.Parse(parts[1]) - 1;
+                                    int y = int.Parse(parts[2]) - 1;
+                                    var evt = new UserInputEvent();
+                                    evt.MouseX = Math.Max(0, x);
+                                    evt.MouseY = Math.Max(0, y);
+                                    evt.LeftButton = (b == 0 || b == 8 || b == 16 || b == 24);
+                                    evt.RightButton = (b == 2);
+
+                                    if (b == 64) evt.Type = InputEventType.MouseScrollUp;
+                                    else if (b == 65) evt.Type = InputEventType.MouseScrollDown;
+                                    else if (b == 35) evt.Type = InputEventType.MouseMove;
+                                    else if (str.EndsWith("M") && b == 2) evt.Type = InputEventType.MouseRightClick;
+                                    else if (str.EndsWith("M") && b == 0) evt.Type = InputEventType.MouseClick;
+
+                                    if (evt.Type != InputEventType.None) {
+                                        events.Add(evt);
+                                        continue;
+                                    }
+                                }
+                            } catch {}
+                        }
+                    }
+                    var escEvt = new UserInputEvent();
+                    escEvt.Type = InputEventType.Key;
+                    escEvt.KeyInfo = ki;
+                    events.Add(escEvt);
+                } else {
+                    var keyEvt = new UserInputEvent();
+                    keyEvt.Type = InputEventType.Key;
+                    keyEvt.KeyInfo = ki;
+                    events.Add(keyEvt);
+                }
+            }
+
+            return events;
+        }
+
         // --- MAIN TUI LOOP ENGINE ---
         public static void Run(
             Hashtable syncHash,
@@ -185,8 +412,15 @@ namespace OmniAdmin {
             bool showServiceProps = false;
             bool showTaskProps = false;
             bool showHistoryDetail = false;
+            bool showContextMenu = false;
+            int contextMenuX = 0;
+            int contextMenuY = 0;
+            int contextMenuPid = 0;
+            string contextMenuName = "";
             List<object> frozenProcessList = null;
             int speedTestRowIndex = 0;
+            int hoverMx = -1;
+            int hoverMy = -1;
             
             // Runspaces references
             PowerShell speedTestPS = null;
@@ -197,6 +431,23 @@ namespace OmniAdmin {
             List<object> historyList = null;
             int historyDays = 1;          // number of days to fetch
             bool historyConfigured = false; // true once user has chosen timeframe and started fetch
+
+            IntPtr hInput = GetStdHandle(STD_INPUT_HANDLE);
+            uint origConsoleMode = 0;
+            bool hasConsoleMode = false;
+            try {
+                if (hInput != IntPtr.Zero && hInput != (IntPtr)(-1)) {
+                    hasConsoleMode = GetConsoleMode(hInput, out origConsoleMode);
+                    if (hasConsoleMode) {
+                        uint newMode = (origConsoleMode | ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT) & ~ENABLE_QUICK_EDIT_MODE;
+                        SetConsoleMode(hInput, newMode);
+                    }
+                }
+            } catch {}
+
+            if (!hasConsoleMode) {
+                try { Console.Write("\x1b[?1000h\x1b[?1006h"); } catch {}
+            }
 
             Console.CursorVisible = false;
             Console.Write("\x1b[?1049h\x1b[H"); // Enable Alternate Screen Buffer (prevents scrollback buffer memory bloat)
@@ -413,21 +664,65 @@ namespace OmniAdmin {
 
                 // Dynamic Header & Footer Height Sizing
                 object staticData = syncHash["StaticData"];
-                int headerHeight = (staticData != null && GetProperty(staticData, "GpuName") != null) ? 10 : 9;
-                if (diagnostics) headerHeight += 1;
+                int statsBoxHeight = (staticData != null && GetProperty(staticData, "GpuName") != null) ? 10 : 9;
+                if (diagnostics) statsBoxHeight += 1;
+
+                int totalHeaderHeight = statsBoxHeight + 4; // Top Menu (1) + Sep (1) + Stats Box (statsBoxHeight) + Nav Bar (1) + Col Headers (1)
+                int headerHeight = totalHeaderHeight - 2;
 
                 // Resolve Footer Items
                 string[] footerItems = new string[0];
                 if (activeMode == "Processes") {
-                    footerItems = new string[] { "\x1b[36;1m[S]\x1b[0m Search", "\x1b[36;1m[1-6]\x1b[0m Sort", "\x1b[36;1m[K]\x1b[0m Kill", "\x1b[36;1m[<-/->]\x1b[0m Page", "\x1b[36;1m[P]\x1b[0m " + (paused ? "Resume" : "Pause"), "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[Q]\x1b[0m Quit" };
+                    footerItems = new string[] {
+                        "\x1b[36;1m[S]\x1b[0m Search",
+                        "\x1b[36;1m[1-6]\x1b[0m Sort",
+                        "\x1b[36;1m[K]\x1b[0m Kill",
+                        "\x1b[1;37;44m ◄ PREV \x1b[0m",
+                        "\x1b[1;37;44m NEXT ► \x1b[0m",
+                        "\x1b[36;1m[P]\x1b[0m " + (paused ? "\x1b[43;30;1m[▶ RESUME UPDATES]\x1b[0m" : "\x1b[41;37;1m[⏸ PAUSE TO KILL]\x1b[0m"),
+                        "\x1b[36;1m[M]\x1b[0m Menu",
+                        "\x1b[36;1m[Q]\x1b[0m Quit"
+                    };
                 } else if (activeMode == "Services") {
-                    footerItems = new string[] { "\x1b[33;1m[S]\x1b[0m Search", "\x1b[33;1m[P]\x1b[0m Props", "\x1b[33;1m[T]\x1b[0m Start/Stop", "\x1b[33;1m[R]\x1b[0m Restart", "\x1b[33;1m[<-/->]\x1b[0m Page", "\x1b[33;1m[M]\x1b[0m Menu", "\x1b[33;1m[ESC]\x1b[0m Back" };
+                    footerItems = new string[] {
+                        "\x1b[33;1m[S]\x1b[0m Search",
+                        "\x1b[33;1m[P]\x1b[0m Props",
+                        "\x1b[33;1m[T]\x1b[0m Start/Stop",
+                        "\x1b[33;1m[R]\x1b[0m Restart",
+                        "\x1b[1;37;44m ◄ PREV \x1b[0m",
+                        "\x1b[1;37;44m NEXT ► \x1b[0m",
+                        "\x1b[33;1m[M]\x1b[0m Menu",
+                        "\x1b[33;1m[ESC]\x1b[0m Back"
+                    };
                 } else if (activeMode == "Tasks") {
-                    footerItems = new string[] { "\x1b[36;1m[S]\x1b[0m Search", "\x1b[36;1m[T]\x1b[0m Toggle Run", "\x1b[36;1m[P]\x1b[0m Props", "\x1b[36;1m[1-4]\x1b[0m Sort", "\x1b[36;1m[<-/->]\x1b[0m Page", "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[ESC]\x1b[0m Back" };
+                    footerItems = new string[] {
+                        "\x1b[36;1m[S]\x1b[0m Search",
+                        "\x1b[36;1m[T]\x1b[0m Toggle Run",
+                        "\x1b[36;1m[P]\x1b[0m Props",
+                        "\x1b[36;1m[1-4]\x1b[0m Sort",
+                        "\x1b[1;37;44m ◄ PREV \x1b[0m",
+                        "\x1b[1;37;44m NEXT ► \x1b[0m",
+                        "\x1b[36;1m[M]\x1b[0m Menu",
+                        "\x1b[36;1m[ESC]\x1b[0m Back"
+                    };
                 } else if (activeMode == "Apps") {
-                    footerItems = new string[] { "\x1b[32;1m[S]\x1b[0m Search", "\x1b[32;1m[1-5]\x1b[0m Sort", "\x1b[32;1m[<-/->]\x1b[0m Page", "\x1b[32;1m[M]\x1b[0m Menu", "\x1b[32;1m[ESC]\x1b[0m Back" };
+                    footerItems = new string[] {
+                        "\x1b[32;1m[S]\x1b[0m Search",
+                        "\x1b[32;1m[1-5]\x1b[0m Sort",
+                        "\x1b[1;37;44m ◄ PREV \x1b[0m",
+                        "\x1b[1;37;44m NEXT ► \x1b[0m",
+                        "\x1b[32;1m[M]\x1b[0m Menu",
+                        "\x1b[32;1m[ESC]\x1b[0m Back"
+                    };
                 } else if (activeMode == "Users") {
-                    footerItems = new string[] { "\x1b[35;1m[S]\x1b[0m Search", "\x1b[35;1m[L]\x1b[0m Logoff User", "\x1b[35;1m[<-/->]\x1b[0m Page", "\x1b[35;1m[M]\x1b[0m Menu", "\x1b[35;1m[ESC]\x1b[0m Back" };
+                    footerItems = new string[] {
+                        "\x1b[35;1m[S]\x1b[0m Search",
+                        "\x1b[35;1m[L]\x1b[0m Logoff User",
+                        "\x1b[1;37;44m ◄ PREV \x1b[0m",
+                        "\x1b[1;37;44m NEXT ► \x1b[0m",
+                        "\x1b[35;1m[M]\x1b[0m Menu",
+                        "\x1b[35;1m[ESC]\x1b[0m Back"
+                    };
                 } else if (activeMode == "SpeedTest") {
                     if (ToBool(st["Running"])) {
                         footerItems = new string[] { "\x1b[33;1mTesting in progress... Please do not close or resize the terminal.\x1b[0m" };
@@ -437,8 +732,6 @@ namespace OmniAdmin {
                 } else if (activeMode == "History") {
                     if (!historyConfigured)
                         footerItems = new string[] { "\x1b[94;1m[1]\x1b[0m 1d", "\x1b[94;1m[2]\x1b[0m 7d", "\x1b[94;1m[3]\x1b[0m 14d", "\x1b[94;1m[4]\x1b[0m 30d", "\x1b[94;1m[5]\x1b[0m 90d", "\x1b[94;1m[C]\x1b[0m Custom", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
-                    else
-                        footerItems = new string[] { "\x1b[94;1m[S]\x1b[0m Search", "\x1b[94;1m[1-5]\x1b[0m Sort", "\x1b[94;1m[Enter]\x1b[0m Details", "\x1b[94;1m[R]\x1b[0m Change Days", "\x1b[94;1m[<-/->]\x1b[0m Page", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
                 }
 
                 string singleLineFooter = " " + string.Join("  \x1b[90m│\x1b[0m  ", footerItems);
@@ -447,24 +740,38 @@ namespace OmniAdmin {
                 string footerLine1 = "";
                 string footerLine2 = null;
                 int footerLinesCount = 1;
+                var r1 = new List<string>();
+                var r2 = new List<string>();
 
                 if (visSingleLen <= frameWidth || footerItems.Length <= 1) {
                     footerLine1 = singleLineFooter;
+                    foreach (var fi in footerItems) r1.Add(fi);
                 } else {
                     footerLinesCount = 2;
-                    int half = (int)Math.Ceiling(footerItems.Length / 2.0);
-                    var r1 = new List<string>();
-                    var r2 = new List<string>();
-                    for (int fi = 0; fi < footerItems.Length; fi++) {
-                        if (fi < half) r1.Add(footerItems[fi]);
-                        else r2.Add(footerItems[fi]);
+                    int curLine1Len = 1;
+                    int itemIdx = 0;
+                    while (itemIdx < footerItems.Length) {
+                        string item = footerItems[itemIdx];
+                        int itemVisLen = GetVisibleLength(item);
+                        int sepLen = (r1.Count > 0) ? 5 : 0;
+                        if (curLine1Len + sepLen + itemVisLen <= frameWidth || r1.Count == 0) {
+                            r1.Add(item);
+                            curLine1Len += sepLen + itemVisLen;
+                            itemIdx++;
+                        } else {
+                            break;
+                        }
+                    }
+                    while (itemIdx < footerItems.Length) {
+                        r2.Add(footerItems[itemIdx]);
+                        itemIdx++;
                     }
                     footerLine1 = " " + string.Join("  \x1b[90m│\x1b[0m  ", r1.ToArray());
                     footerLine2 = " " + string.Join("  \x1b[90m│\x1b[0m  ", r2.ToArray());
                 }
 
                 int totalFooterHeight = 1 + footerLinesCount; // 1 top separator + footerLinesCount menu text lines
-                int maxAvailableRows = height - headerHeight - 2 - totalFooterHeight;
+                int maxAvailableRows = height - totalHeaderHeight - totalFooterHeight - 1;
                 if (maxAvailableRows < 1) maxAvailableRows = 1;
                 int currentPageSize = useFixedPageSize ? Math.Min(defaultPageSize, maxAvailableRows) : maxAvailableRows;
 
@@ -616,11 +923,39 @@ namespace OmniAdmin {
                     titlePage = string.Format("{0}/{1}", pageIndex + 1, maxPages);
                 }
                 
-                string rawTitle = " OMNIADMIN  " + activeMode.ToUpper() + (string.IsNullOrEmpty(titlePage) ? "" : " [" + titlePage + "]") + (isLocal ? "" : " (" + computerName + ")");
-                int headerPad = frameWidth - 8 - rawTitle.Length;
-                if (headerPad < 0) headerPad = 0;
+                // Row 0: Standalone Top Menu Bar (Solid Blue MS Edit Style)
+                StringBuilder topMenuSb = new StringBuilder();
+                bool isMenuBtnHover = (hoverMy == 0 && hoverMx >= 1 && hoverMx <= 9);
+                topMenuSb.Append("\x1b[44;37m " + (isMenuBtnHover ? "\x1b[30;46;1m ≡ Menu \x1b[0m\x1b[44;37m  " : "\x1b[1;30;47m ≡ Menu \x1b[0m\x1b[44;37m  "));
+                
+                int curMenuX = 12;
+                string[] modeNames = new string[] { "Processes", "Services", "Tasks", "Apps", "Users", "SpeedTest", "History" };
+                for (int m = 0; m < modeNames.Length; m++) {
+                    string mName = modeNames[m];
+                    int mWidth = mName.Length + 2;
+                    bool isModeHover = (hoverMy == 0 && hoverMx >= curMenuX && hoverMx < curMenuX + mWidth);
+                    if (mName == activeMode) {
+                        topMenuSb.Append(isModeHover ? "\x1b[30;46;1m " + mName + " \x1b[0m\x1b[44;37m  " : "\x1b[47;30;1m " + mName + " \x1b[0m\x1b[44;37m  ");
+                    } else {
+                        topMenuSb.Append(isModeHover ? "\x1b[30;46;1m " + mName + " \x1b[0m\x1b[44;37m  " : "\x1b[1;37m " + mName + " \x1b[0m\x1b[44;37m  ");
+                    }
+                    curMenuX += mWidth + 2;
+                }
 
-                sb.Append(themeColor + "┌─── " + "\x1b[1;97mOMNIADMIN\x1b[0m  " + themePill + " " + activeMode.ToUpper() + " \x1b[0m" + (string.IsNullOrEmpty(titlePage) ? "" : " " + themeColor + "[" + titlePage + "]\x1b[0m") + (isLocal ? "" : " \x1b[90m(" + computerName + ")\x1b[0m") + " " + themeColor + new string('─', headerPad) + "┐\x1b[0m\n");
+                string rightInfo = (string.IsNullOrEmpty(titlePage) ? "" : "[" + titlePage + "] ") + (isLocal ? "" : "(" + computerName + ")");
+                int topMenuVisLen = GetVisibleLength(topMenuSb.ToString()) + rightInfo.Length;
+                int topPad = frameWidth - topMenuVisLen;
+                if (topPad < 0) topPad = 0;
+
+                string fullTopRow = "\x1b[44;37m" + topMenuSb.ToString() + new string(' ', topPad) + (string.IsNullOrEmpty(rightInfo) ? "" : "\x1b[1;97m" + rightInfo) + "\x1b[0m";
+                sb.Append(TruncateAnsi(fullTopRow, frameWidth) + "\n");
+                
+                // Row 1: Separation blank line
+                sb.Append(new string(' ', frameWidth) + "\n");
+
+                // Row 2: System Monitor Box Header
+                int boxPad = Math.Max(0, frameWidth - 21);
+                sb.Append(themeColor + "┌─── " + "\x1b[1;97mSYSTEM MONITOR\x1b[0m " + themeColor + new string('─', boxPad) + "┐\x1b[0m\n");
 
                 // 2. Stats Bar
                 object sysData = syncHash["SysData"];
@@ -712,6 +1047,31 @@ namespace OmniAdmin {
                     }
                 }
                 sb.Append(themeColor + "└" + new string('─', frameWidth - 2) + "┘\x1b[0m\n");
+
+                // Render Page Navigation & Pause Header Bar
+                if (activeMode != "SpeedTest") {
+                    bool isNavHover = (hoverMy == headerHeight || hoverMy == headerHeight - 1);
+                    bool prevHover = isNavHover && (hoverMx >= 1 && hoverMx <= 9);
+                    bool nextHover = isNavHover && (hoverMx >= 20 && hoverMx <= 29);
+                    bool pauseHover = isNavHover && (hoverMx >= 30 && hoverMx <= 55);
+
+                    string prevBtn = prevHover ? "\x1b[1;30;46m ◄ PREV \x1b[0m" : "\x1b[1;37;44m ◄ PREV \x1b[0m";
+                    string nextBtn = nextHover ? "\x1b[1;30;46m NEXT ► \x1b[0m" : "\x1b[1;37;44m NEXT ► \x1b[0m";
+                    string pageDisp = string.Format(" \x1b[1;37mPage {0} of {1}\x1b[0m ", pageIndex + 1, maxPages);
+
+                    string pauseBtn = "";
+                    if (activeMode == "Processes") {
+                        if (pauseHover) {
+                            pauseBtn = paused ? " \x1b[30;46;1m [▶ RESUME UPDATES] \x1b[0m" : " \x1b[30;43;1m [⏸ PAUSE TO KILL] \x1b[0m";
+                        } else {
+                            pauseBtn = paused ? " \x1b[43;30;1m [▶ RESUME UPDATES] \x1b[0m" : " \x1b[41;37;1m [⏸ PAUSE TO KILL] \x1b[0m";
+                        }
+                    }
+
+                    string navBar = " " + prevBtn + " " + pageDisp + " " + nextBtn + pauseBtn;
+                    int navVisLen = GetVisibleLength(navBar);
+                    sb.Append(navBar + new string(' ', Math.Max(0, frameWidth - navVisLen)) + "\n");
+                }
 
                 // --- DRAW VIEWPORT PAGE CONTENT ---
                 if (activeMode == "SpeedTest") {
@@ -843,6 +1203,8 @@ namespace OmniAdmin {
                     // Draw Table Grids (Processes, Services, Tasks, Apps, Users)
                     
                     // Render Columns Headers
+                    bool isHeaderHoverLine = (hoverMy == headerHeight + 1 || hoverMy == headerHeight);
+                    int curColX = 2;
                     sb.Append("  ");
                     for (int i = 0; i < colHeaders.Length; i++) {
                         string hText = colHeaders[i];
@@ -854,13 +1216,21 @@ namespace OmniAdmin {
                         
                         string fmt = "{0," + colAligns[i] + colWidths[i] + "}";
                         string cell = string.Format(fmt, hText);
+
+                        bool isColHover = isHeaderHoverLine && (hoverMx >= curColX && hoverMx < curColX + colWidths[i]);
                         
-                        if (i == selColIndex) sb.Append(string.Format("{0}{1}\x1b[0m", themePill, cell));
-                        else sb.Append(string.Format("\x1b[1;37m{0}\x1b[0m", cell));
+                        if (isColHover) {
+                            sb.Append(string.Format("\x1b[30;46;1m{0}\x1b[0m", cell));
+                        } else if (i == selColIndex) {
+                            sb.Append(string.Format("{0}{1}\x1b[0m", themePill, cell));
+                        } else {
+                            sb.Append(string.Format("\x1b[1;37m{0}\x1b[0m", cell));
+                        }
                         
                         if (i < colHeaders.Length - 1) {
                             sb.Append("\x1b[90m│\x1b[0m");
                         }
+                        curColX += colWidths[i] + 1;
                     }
                     sb.Append("\n");
                     sb.Append("\x1b[90m" + new string('\u2500', frameWidth) + "\x1b[0m\n");
@@ -965,8 +1335,13 @@ namespace OmniAdmin {
                                 else if (cpuVal > 25) fg = "\x1b[36m"; // Cyan
                                 else fg = "\x1b[90m"; // Gray
                                 
-                                if (paused && i == selectedRow) {
+                                int hoverRow = hoverMy - (headerHeight + 2);
+                                bool isHoveredRow = (i == hoverRow);
+
+                                if (i == selectedRow) {
                                     sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                } else if (isHoveredRow) {
+                                    sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("{0}{1}\x1b[0m", fg, line.PadRight(frameWidth)) + "\n");
                                 }
@@ -990,8 +1365,13 @@ namespace OmniAdmin {
                                 else if (status == "Stopped") fg = "\x1b[31m"; // Red
                                 else fg = "\x1b[33m"; // Yellow
                                 
+                                int hoverRow = hoverMy - (headerHeight + 2);
+                                bool isHoveredRow = (i == hoverRow);
+
                                 if (i == selectedRow) {
                                     sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                } else if (isHoveredRow) {
+                                    sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("{0}{1}\x1b[0m", fg, line.PadRight(frameWidth)) + "\n");
                                 }
@@ -1020,8 +1400,13 @@ namespace OmniAdmin {
                                 else if (state == "Ready") fg = "\x1b[37m"; // White
                                 else fg = "\x1b[90m"; // Gray
                                 
+                                int hoverRow = hoverMy - (headerHeight + 2);
+                                bool isHoveredRow = (i == hoverRow);
+
                                 if (i == selectedRow && !showTaskProps) {
                                     sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                } else if (isHoveredRow && !showTaskProps) {
+                                    sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     string resColor = (res == "0") ? "\x1b[32m" : "\x1b[31m"; // Green for 0, Red for others
                                     int sepIdx = line.LastIndexOf('│');
@@ -1049,8 +1434,13 @@ namespace OmniAdmin {
                                 line = "  " + aName + "│" + ver + "│" + pub + "│" + type + "│" + date;
                                 line = line.PadRight(frameWidth).Substring(0, frameWidth);
                                 
+                                int hoverRow = hoverMy - (headerHeight + 2);
+                                bool isHoveredRow = (i == hoverRow);
+
                                 if (i == selectedRow) {
                                     sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                } else if (isHoveredRow) {
+                                    sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line) + "\n");
                                 }
@@ -1154,13 +1544,10 @@ namespace OmniAdmin {
                 sb.Append("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
 
                 if (footerLinesCount == 1) {
-                    int pad1 = frameWidth - GetVisibleLength(footerLine1);
-                    sb.Append(footerLine1 + new string(' ', Math.Max(0, pad1)));
+                    sb.Append(CenterAnsi(footerLine1, frameWidth));
                 } else {
-                    int pad1 = frameWidth - GetVisibleLength(footerLine1);
-                    sb.Append(footerLine1 + new string(' ', Math.Max(0, pad1)) + "\n");
-                    int pad2 = frameWidth - GetVisibleLength(footerLine2);
-                    sb.Append(footerLine2 + new string(' ', Math.Max(0, pad2)));
+                    sb.Append(CenterAnsi(footerLine1, frameWidth) + "\n");
+                    sb.Append(CenterAnsi(footerLine2, frameWidth));
                 }
 
                 // --- OVERLAYS AND DIALOG BOXES ---
@@ -1316,363 +1703,903 @@ namespace OmniAdmin {
                     }
                 }
 
-                // 4. Main Menu Overlay (Uses decoupled menuSelectedIndex)
+                // 4. Main Menu Overlay (Dropdown beneath [≡ Menu] button)
                 if (showMainMenu) {
-                    int boxW = 50, boxH = 13;
-                    int startX = (width - boxW) / 2;
-                    int startY = (height - boxH) / 2;
+                    int boxW = 36, boxH = 10;
+                    int startX = 1;
+                    int startY = 1;
 
                     for (int y = 0; y <= boxH; y++) {
                         sb.Append(string.Format("\x1b[{0};{1}H", startY + y + 1, startX + 1));
                         sb.Append("\x1b[37;44m" + new string(' ', boxW) + "\x1b[0m");
                     }
 
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44mMAIN MENU\x1b[0m", startY + 2, startX + 3));
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[1;37;44m ≡ NAVIGATION MENU \x1b[0m", startY + 1, startX + 2));
                     
                     string[] items = new string[] {
-                        "  [1] Live Processes View",
+                        "  [1] Live Processes",
                         "  [2] Service Manager",
                         "  [3] Scheduled Tasks",
-                        "  [4] Installed Applications",
+                        "  [4] Installed Apps",
                         "  [5] Active User Sessions",
                         "  [6] Speed Test Monitor",
-                        "  [7] Browser History View"
+                        "  [7] Browser History"
                     };
 
                     for (int i = 0; i < items.Length; i++) {
-                        sb.Append(string.Format("\x1b[{0};{1}H", startY + 4 + i, startX + 5));
+                        sb.Append(string.Format("\x1b[{0};{1}H", startY + 3 + i, startX + 2));
                         if (i == menuSelectedIndex) {
-                            sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", items[i].PadRight(boxW - 10)));
+                            sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", items[i].PadRight(boxW - 4)));
                         } else {
-                            sb.Append(string.Format("\x1b[37;44m{0}\x1b[0m", items[i]));
+                            sb.Append(string.Format("\x1b[37;44m{0}\x1b[0m", items[i].PadRight(boxW - 4)));
                         }
                     }
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m[ESC] Close\x1b[0m", startY + boxH - 1, startX + 3));
+                }
+
+                // 5. Process Right-Click Context Menu
+                if (showContextMenu && contextMenuPid > 0) {
+                    int boxW = 34, boxH = 5;
+                    int startX = Math.Min(frameWidth - boxW, Math.Max(1, contextMenuX));
+                    int startY = Math.Min(height - boxH - 2, Math.Max(1, contextMenuY));
+
+                    string nameClean = contextMenuName.Length > 12 ? contextMenuName.Substring(0, 12) + ".." : contextMenuName;
+                    string pTitle = string.Format(" PROCESS: {0} ({1}) ", nameClean, contextMenuPid);
+
+                    // Row 0: Top frame border with title
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+
+                    // Row 1: Kill Action (Red background across full inner width)
+                    string killLabel = string.Format(" [K] Kill Process (PID {0}) ", contextMenuPid);
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│\x1b[41;37;1m{2}\x1b[37;44m│\x1b[0m", startY + 2, startX + 1, killLabel.PadRight(boxW - 2)));
+
+                    // Row 2: Resume / Pause Updates
+                    string pState = paused ? " [R] Resume Updates " : " [P] Pause Updates ";
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│{2}│\x1b[0m", startY + 3, startX + 1, pState.PadRight(boxW - 2)));
+
+                    // Row 3: Cancel
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│{2}│\x1b[0m", startY + 4, startX + 1, " [ESC] Cancel ".PadRight(boxW - 2)));
+
+                    // Row 4: Bottom border
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m└{2}┘\x1b[0m", startY + 5, startX + 1, new string('─', boxW - 2)));
                 }
 
                 // --- WRITE COMPLETED BUFFER TO SCREEN ---
                 Console.Write(sb.ToString());
 
-                // --- NON-BLOCKING USER INPUT HANDLER ---
-                if (Console.KeyAvailable) {
-                    var keyInfo = Console.ReadKey(true);
-                    var key = keyInfo.Key;
+                // --- UNIFIED USER INPUT HANDLER (KEYBOARD & MOUSE) ---
+                var inputEvents = FetchInputEvents(hInput, hasConsoleMode);
+                foreach (var evt in inputEvents) {
+                    if (evt.Type == InputEventType.Key) {
+                        var keyInfo = evt.KeyInfo;
+                        var key = keyInfo.Key;
 
-                    // Clear redundant arrow buffers
-                    if (key == ConsoleKey.LeftArrow || key == ConsoleKey.RightArrow || key == ConsoleKey.UpArrow || key == ConsoleKey.DownArrow) {
-                        Thread.Sleep(10);
-                        while (Console.KeyAvailable) Console.ReadKey(true);
-                    }
-
-                    if (key == ConsoleKey.Q) {
-                        syncHash["Running"] = false;
-                        break;
-                    }
-
-                    if (key == ConsoleKey.M) {
-                        showMainMenu = true;
-                        menuSelectedIndex = 0;
-                    }
-
-                    if (key == ConsoleKey.Escape) {
-                        if (showMainMenu) showMainMenu = false;
-                        else if (showServiceProps) showServiceProps = false;
-                        else if (showTaskProps) showTaskProps = false;
-                        else if (showHistoryDetail) showHistoryDetail = false;
-                        else {
-                            activeMode = "Processes";
-                            showMainMenu = false;
+                        if (key == ConsoleKey.LeftArrow || key == ConsoleKey.RightArrow || key == ConsoleKey.UpArrow || key == ConsoleKey.DownArrow) {
+                            Thread.Sleep(10);
+                            while (Console.KeyAvailable) Console.ReadKey(true);
                         }
-                        Console.Clear();
-                    }
 
-                    // --- INPUT HANDLING: MAIN MENU ---
-                    if (showMainMenu) {
-                        if (key == ConsoleKey.UpArrow) {
-                            menuSelectedIndex = (menuSelectedIndex - 1 + 7) % 7;
+                        if (key == ConsoleKey.Q) {
+                            syncHash["Running"] = false;
+                            break;
                         }
-                        else if (key == ConsoleKey.DownArrow) {
-                            menuSelectedIndex = (menuSelectedIndex + 1) % 7;
-                        }
-                        else if (key == ConsoleKey.Enter) {
-                            if (menuSelectedIndex == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
-                            else if (menuSelectedIndex == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
-                            else if (menuSelectedIndex == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
-                            else if (menuSelectedIndex == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
-                            else if (menuSelectedIndex == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
-                            else if (menuSelectedIndex == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
-                            else if (menuSelectedIndex == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
 
-                            showMainMenu = false;
-                            selectedRow = 0;
-                            pageIndex = 0;
-                            filterText = "";
+                        if (key == ConsoleKey.M) {
+                            showMainMenu = true;
+                            menuSelectedIndex = 0;
+                        }
+
+                        if (key == ConsoleKey.Escape) {
+                            if (showMainMenu) showMainMenu = false;
+                            else if (showServiceProps) showServiceProps = false;
+                            else if (showTaskProps) showTaskProps = false;
+                            else if (showHistoryDetail) showHistoryDetail = false;
+                            else {
+                                activeMode = "Processes";
+                                showMainMenu = false;
+                            }
                             Console.Clear();
                         }
-                        else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
-                            int choice = (int)key - (int)ConsoleKey.D1;
-                            if (choice == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
-                            else if (choice == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
-                            else if (choice == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
-                            else if (choice == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
-                            else if (choice == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
-                            else if (choice == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
-                            else if (choice == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
 
-                            showMainMenu = false;
-                            selectedRow = 0;
-                            pageIndex = 0;
-                            filterText = "";
-                            Console.Clear();
-                        }
-                    }
-                    // --- INPUT HANDLING: SPEED TEST MODE ---
-                    else if (activeMode == "SpeedTest") {
-                        if (ToBool(st["Running"])) {
-                            Thread.Sleep(50);
-                            continue;
-                        }
+                        // --- INPUT HANDLING: MAIN MENU ---
+                        if (showMainMenu) {
+                            if (key == ConsoleKey.UpArrow) {
+                                menuSelectedIndex = (menuSelectedIndex - 1 + 7) % 7;
+                            }
+                            else if (key == ConsoleKey.DownArrow) {
+                                menuSelectedIndex = (menuSelectedIndex + 1) % 7;
+                            }
+                            else if (key == ConsoleKey.Enter) {
+                                if (menuSelectedIndex == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
+                                else if (menuSelectedIndex == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
+                                else if (menuSelectedIndex == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
+                                else if (menuSelectedIndex == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
+                                else if (menuSelectedIndex == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
+                                else if (menuSelectedIndex == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
+                                else if (menuSelectedIndex == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
 
-                        int startBtnIdx = isLocal ? 3 : 4;
-
-                        if (key == ConsoleKey.UpArrow) {
-                            speedTestRowIndex = (speedTestRowIndex - 1 + (startBtnIdx + 1)) % (startBtnIdx + 1);
-                        }
-                        else if (key == ConsoleKey.DownArrow) {
-                            speedTestRowIndex = (speedTestRowIndex + 1) % (startBtnIdx + 1);
-                        }
-                        else if (key == ConsoleKey.LeftArrow || key == ConsoleKey.RightArrow) {
-                            if (speedTestRowIndex == 0 && !isLocal) {
-                                string currentMode = GetString(st["TestMode"]) == "Remote" ? "P2P" : "Remote";
-                                st["TestMode"] = currentMode;
-                            }
-                            else if (speedTestRowIndex == 1) {
-                                int thr = ToInt(st["Threads"], 8);
-                                if (key == ConsoleKey.LeftArrow && thr > 1) st["Threads"] = thr - 1;
-                                else if (key == ConsoleKey.RightArrow && thr < 64) st["Threads"] = thr + 1;
-                            }
-                            else if (speedTestRowIndex == 2) {
-                                int timeout = ToInt(st["TimeoutSeconds"], 15);
-                                if (key == ConsoleKey.LeftArrow && timeout > 5) st["TimeoutSeconds"] = timeout - 1;
-                                else if (key == ConsoleKey.RightArrow && timeout < 120) st["TimeoutSeconds"] = timeout + 1;
-                            }
-                            else if (speedTestRowIndex == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
-                                int port = ToInt(st["Port"], 5201);
-                                if (key == ConsoleKey.LeftArrow && port > 1024) st["Port"] = port - 1;
-                                else if (key == ConsoleKey.RightArrow && port < 65535) st["Port"] = port + 1;
-                            }
-                        }
-                        else if (key == ConsoleKey.Enter) {
-                            int result;
-                            if (speedTestRowIndex == 1) {
-                                Console.CursorVisible = true;
-                                Console.SetCursorPosition(0, height - 1);
-                                Console.Write(" ENTER THREADS (1-64): ");
-                                if (int.TryParse(Console.ReadLine(), out result) && result >= 1 && result <= 64) {
-                                    st["Threads"] = result;
-                                }
-                                Console.CursorVisible = false;
-                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
-                            }
-                            else if (speedTestRowIndex == 2) {
-                                Console.CursorVisible = true;
-                                Console.SetCursorPosition(0, height - 1);
-                                Console.Write(" ENTER TIMEOUT SECONDS (5-120): ");
-                                if (int.TryParse(Console.ReadLine(), out result) && result >= 5 && result <= 120) {
-                                    st["TimeoutSeconds"] = result;
-                                }
-                                Console.CursorVisible = false;
-                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
-                            }
-                            else if (speedTestRowIndex == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
-                                Console.CursorVisible = true;
-                                Console.SetCursorPosition(0, height - 1);
-                                Console.Write(" ENTER P2P PORT (1024-65535): ");
-                                if (int.TryParse(Console.ReadLine(), out result) && result >= 1024 && result <= 65535) {
-                                    st["Port"] = result;
-                                }
-                                Console.CursorVisible = false;
-                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
-                            }
-                            else if (speedTestRowIndex == startBtnIdx) {
-                                st["Running"] = true;
-                                st["ActivePhase"] = "Latency";
-                                st["ProgressPercent"] = 0.0;
-                                var res = st["Results"] as IDictionary;
-                                res["Latency"] = null;
-                                res["Download"] = null;
-                                res["Upload"] = null;
-                                res["Error"] = "";
-
-                                speedTestPS = PowerShell.Create();
-                                speedTestPS.AddScript(stWorkerScript)
-                                           .AddArgument(syncHash)
-                                           .AddArgument(initNetEngineScript)
-                                           .AddArgument(computerName);
-                                speedTestAsyncHandle = speedTestPS.BeginInvoke();
-                            }
-                        }
-                    }
-                    // --- INPUT HANDLING: GRID NAVIGATION PANELS ---
-                    else {
-                        if (showServiceProps || showTaskProps || showHistoryDetail) {
-                            // While a detail panel is open, only process Escape (handled above)
-                            Thread.Sleep(50);
-                            continue;
-                        }
-
-                        if (activeMode == "History" && !historyConfigured) {
-                            if (key == ConsoleKey.D1 || key == ConsoleKey.NumPad1) {
-                                historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
-                            }
-                            else if (key == ConsoleKey.D2 || key == ConsoleKey.NumPad2) {
-                                historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
-                            }
-                            else if (key == ConsoleKey.D3 || key == ConsoleKey.NumPad3) {
-                                historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
-                            }
-                            else if (key == ConsoleKey.D4 || key == ConsoleKey.NumPad4) {
-                                historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
-                            }
-                            else if (key == ConsoleKey.D5 || key == ConsoleKey.NumPad5) {
-                                historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
-                            }
-                            else if (key == ConsoleKey.C) {
-                                Console.CursorVisible = true;
-                                Console.SetCursorPosition(0, height - 1);
-                                Console.Write("\x1b[36m ENTER CUSTOM DAYS (1-365): \x1b[0m");
-                                string inputDays = Console.ReadLine();
-                                int parsedDays;
-                                if (int.TryParse(inputDays, out parsedDays) && parsedDays >= 1 && parsedDays <= 365) {
-                                    historyDays = parsedDays;
-                                    historyConfigured = true;
-                                    historyList = null;
-                                    syncHash["HistoryData"] = null;
-                                }
-                                Console.CursorVisible = false;
-                                Console.SetCursorPosition(0, 0);
+                                showMainMenu = false;
+                                selectedRow = 0;
+                                pageIndex = 0;
+                                filterText = "";
                                 Console.Clear();
                             }
-                            Thread.Sleep(50);
-                            continue;
-                        }
+                            else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
+                                int choice = (int)key - (int)ConsoleKey.D1;
+                                if (choice == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
+                                else if (choice == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
+                                else if (choice == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
+                                else if (choice == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
+                                else if (choice == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
+                                else if (choice == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
+                                else if (choice == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
 
-                        if (key == ConsoleKey.S) {
-                            Console.CursorVisible = true;
-                            Console.SetCursorPosition(0, height - 1);
-                            Console.Write("\x1b[36m SEARCH: \x1b[0m");
-                            string search = Console.ReadLine();
-                            filterText = search != null ? search.Trim() : "";
-                            pageIndex = 0;
-                            selectedRow = 0;
-                            Console.CursorVisible = false;
-                            Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
-                        }
-                        else if (key == ConsoleKey.UpArrow) {
-                            if (selectedRow > 0) selectedRow--;
-                        }
-                        else if (key == ConsoleKey.DownArrow) {
-                            if (selectedRow < (itemsOnPage - 1)) selectedRow++;
-                        }
-                        else if (key == ConsoleKey.LeftArrow) {
-                            if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
-                        }
-                        else if (key == ConsoleKey.RightArrow) {
-                            if (pageIndex < (maxPages - 1)) { pageIndex++; selectedRow = 0; }
-                        }
-                        else if (key == ConsoleKey.Enter && activeMode == "History" && totalCount > 0) {
-                            showHistoryDetail = true;
-                        }
-                        else if (key == ConsoleKey.P) {
-                            if (activeMode == "Services") {
-                                showServiceProps = true;
+                                showMainMenu = false;
+                                selectedRow = 0;
+                                pageIndex = 0;
+                                filterText = "";
+                                Console.Clear();
                             }
-                            else if (activeMode == "Tasks") {
-                                showTaskProps = true;
+                        }
+                        // --- INPUT HANDLING: SPEED TEST MODE ---
+                        else if (activeMode == "SpeedTest") {
+                            if (ToBool(st["Running"])) {
+                                Thread.Sleep(50);
+                                continue;
                             }
-                            else if (activeMode == "Processes") {
-                                Console.SetCursorPosition(0, 0); // reposition without clearing (avoids flicker)
-                                paused = !paused;
-                                selectedRow = 0; pageIndex = 0;
-                                selColIndex = 2; isDesc = true;
-                                syncHash["ActionStatus"] = ""; filterText = "";
-                                if (paused) {
-                                    var raw = GetProcessList(syncHash);
-                                    frozenProcessList = new List<object>();
-                                    if (raw != null) {
-                                        foreach (var p in raw) frozenProcessList.Add(p);
+
+                            int startBtnIdx = isLocal ? 3 : 4;
+
+                            if (key == ConsoleKey.UpArrow) {
+                                speedTestRowIndex = (speedTestRowIndex - 1 + (startBtnIdx + 1)) % (startBtnIdx + 1);
+                            }
+                            else if (key == ConsoleKey.DownArrow) {
+                                speedTestRowIndex = (speedTestRowIndex + 1) % (startBtnIdx + 1);
+                            }
+                            else if (key == ConsoleKey.LeftArrow || key == ConsoleKey.RightArrow) {
+                                if (speedTestRowIndex == 0 && !isLocal) {
+                                    string currentMode = GetString(st["TestMode"]) == "Remote" ? "P2P" : "Remote";
+                                    st["TestMode"] = currentMode;
+                                }
+                                else if (speedTestRowIndex == 1) {
+                                    int thr = ToInt(st["Threads"], 8);
+                                    if (key == ConsoleKey.LeftArrow && thr > 1) st["Threads"] = thr - 1;
+                                    else if (key == ConsoleKey.RightArrow && thr < 64) st["Threads"] = thr + 1;
+                                }
+                                else if (speedTestRowIndex == 2) {
+                                    int timeout = ToInt(st["TimeoutSeconds"], 15);
+                                    if (key == ConsoleKey.LeftArrow && timeout > 5) st["TimeoutSeconds"] = timeout - 1;
+                                    else if (key == ConsoleKey.RightArrow && timeout < 120) st["TimeoutSeconds"] = timeout + 1;
+                                }
+                                else if (speedTestRowIndex == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
+                                    int port = ToInt(st["Port"], 5201);
+                                    if (key == ConsoleKey.LeftArrow && port > 1024) st["Port"] = port - 1;
+                                    else if (key == ConsoleKey.RightArrow && port < 65535) st["Port"] = port + 1;
+                                }
+                            }
+                            else if (key == ConsoleKey.Enter) {
+                                int result;
+                                if (speedTestRowIndex == 1) {
+                                    Console.CursorVisible = true;
+                                    Console.SetCursorPosition(0, height - 1);
+                                    Console.Write(" ENTER THREADS (1-64): ");
+                                    if (int.TryParse(Console.ReadLine(), out result) && result >= 1 && result <= 64) {
+                                        st["Threads"] = result;
+                                    }
+                                    Console.CursorVisible = false;
+                                    Console.SetCursorPosition(0, 0);
+                                }
+                                else if (speedTestRowIndex == 2) {
+                                    Console.CursorVisible = true;
+                                    Console.SetCursorPosition(0, height - 1);
+                                    Console.Write(" ENTER TIMEOUT SECONDS (5-120): ");
+                                    if (int.TryParse(Console.ReadLine(), out result) && result >= 5 && result <= 120) {
+                                        st["TimeoutSeconds"] = result;
+                                    }
+                                    Console.CursorVisible = false;
+                                    Console.SetCursorPosition(0, 0);
+                                }
+                                else if (speedTestRowIndex == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
+                                    Console.CursorVisible = true;
+                                    Console.SetCursorPosition(0, height - 1);
+                                    Console.Write(" ENTER P2P PORT (1024-65535): ");
+                                    if (int.TryParse(Console.ReadLine(), out result) && result >= 1024 && result <= 65535) {
+                                        st["Port"] = result;
+                                    }
+                                    Console.CursorVisible = false;
+                                    Console.SetCursorPosition(0, 0);
+                                }
+                                else if (speedTestRowIndex == startBtnIdx) {
+                                    st["Running"] = true;
+                                    st["ActivePhase"] = "Latency";
+                                    st["ProgressPercent"] = 0.0;
+                                    var res = st["Results"] as IDictionary;
+                                    res["Latency"] = null;
+                                    res["Download"] = null;
+                                    res["Upload"] = null;
+                                    res["Error"] = "";
+
+                                    speedTestPS = PowerShell.Create();
+                                    speedTestPS.AddScript(stWorkerScript)
+                                               .AddArgument(syncHash)
+                                               .AddArgument(initNetEngineScript)
+                                               .AddArgument(computerName);
+                                    speedTestAsyncHandle = speedTestPS.BeginInvoke();
+                                }
+                            }
+                        }
+                        // --- INPUT HANDLING: GRID NAVIGATION PANELS ---
+                        else {
+                            if (showServiceProps || showTaskProps || showHistoryDetail) {
+                                Thread.Sleep(50);
+                                continue;
+                            }
+
+                            if (activeMode == "History" && !historyConfigured) {
+                                if (key == ConsoleKey.D1 || key == ConsoleKey.NumPad1) {
+                                    historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                }
+                                else if (key == ConsoleKey.D2 || key == ConsoleKey.NumPad2) {
+                                    historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                }
+                                else if (key == ConsoleKey.D3 || key == ConsoleKey.NumPad3) {
+                                    historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                }
+                                else if (key == ConsoleKey.D4 || key == ConsoleKey.NumPad4) {
+                                    historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                }
+                                else if (key == ConsoleKey.D5 || key == ConsoleKey.NumPad5) {
+                                    historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                }
+                                else if (key == ConsoleKey.C) {
+                                    Console.CursorVisible = true;
+                                    Console.SetCursorPosition(0, height - 1);
+                                    Console.Write("\x1b[36m ENTER CUSTOM DAYS (1-365): \x1b[0m");
+                                    string inputDays = Console.ReadLine();
+                                    int parsedDays;
+                                    if (int.TryParse(inputDays, out parsedDays) && parsedDays >= 1 && parsedDays <= 365) {
+                                        historyDays = parsedDays;
+                                        historyConfigured = true;
+                                        historyList = null;
+                                        syncHash["HistoryData"] = null;
+                                    }
+                                    Console.CursorVisible = false;
+                                    Console.SetCursorPosition(0, 0);
+                                    Console.Clear();
+                                }
+                                Thread.Sleep(50);
+                                continue;
+                            }
+
+                            if (key == ConsoleKey.S) {
+                                Console.CursorVisible = true;
+                                Console.SetCursorPosition(0, height - 1);
+                                Console.Write("\x1b[36m SEARCH: \x1b[0m");
+                                string search = Console.ReadLine();
+                                filterText = search != null ? search.Trim() : "";
+                                pageIndex = 0;
+                                selectedRow = 0;
+                                Console.CursorVisible = false;
+                                Console.SetCursorPosition(0, 0);
+                            }
+                            else if (key == ConsoleKey.UpArrow) {
+                                if (selectedRow > 0) selectedRow--;
+                            }
+                            else if (key == ConsoleKey.DownArrow) {
+                                if (selectedRow < (itemsOnPage - 1)) selectedRow++;
+                            }
+                            else if (key == ConsoleKey.LeftArrow) {
+                                if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
+                            }
+                            else if (key == ConsoleKey.RightArrow) {
+                                if (pageIndex < (maxPages - 1)) { pageIndex++; selectedRow = 0; }
+                            }
+                            else if (key == ConsoleKey.Enter && activeMode == "History" && totalCount > 0) {
+                                showHistoryDetail = true;
+                            }
+                            else if (key == ConsoleKey.P) {
+                                if (activeMode == "Services") {
+                                    showServiceProps = true;
+                                }
+                                else if (activeMode == "Tasks") {
+                                    showTaskProps = true;
+                                }
+                                else if (activeMode == "Processes") {
+                                    paused = !paused;
+                                    selectedRow = 0; pageIndex = 0;
+                                    selColIndex = 2; isDesc = true;
+                                    filterText = "";
+                                    if (paused) {
+                                        var raw = GetProcessList(syncHash);
+                                        frozenProcessList = new List<object>();
+                                        if (raw != null) {
+                                            foreach (var p in raw) frozenProcessList.Add(p);
+                                        }
+                                        syncHash["ActionStatus"] = "Process list PAUSED (Frozen for safe process killing)";
+                                    } else {
+                                        frozenProcessList = null;
+                                        syncHash["ActionStatus"] = "Process list RESUMED (Live metrics active)";
+                                    }
+                                }
+                            }
+                            else if (key == ConsoleKey.T) {
+                                int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                if (absIndex < totalCount) {
+                                    var target = listToRender[absIndex];
+                                    if (activeMode == "Services") {
+                                        string currentStatus = GetString(target, "Status");
+                                        string action = (currentStatus == "Running") ? "Stop" : "Start";
+                                        var queue = syncHash["ServiceQueue"];
+                                        var actHash = new Hashtable();
+                                        actHash["Name"] = GetString(target, "Name");
+                                        actHash["Action"] = action;
+                                        queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                                    }
+                                    else if (activeMode == "Tasks") {
+                                        string tName = GetString(target, "TaskName");
+                                        var queue = syncHash["TaskQueue"];
+                                        queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tName });
+                                    }
+                                }
+                            }
+                            else if (key == ConsoleKey.R && activeMode == "Services") {
+                                int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                if (absIndex < totalCount) {
+                                    var target = listToRender[absIndex];
+                                    var queue = syncHash["ServiceQueue"];
+                                    var actHash = new Hashtable();
+                                    actHash["Name"] = GetString(target, "Name");
+                                    actHash["Action"] = "Restart";
+                                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                                }
+                            }
+                            else if (key == ConsoleKey.K && activeMode == "Processes" && paused) {
+                                int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                if (absIndex < totalCount) {
+                                    var target = listToRender[absIndex];
+                                    int pid = GetInt(target, "IDProcess");
+                                    var queue = syncHash["KillQueue"];
+                                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { pid });
+                                }
+                            }
+                            else if (key == ConsoleKey.L && activeMode == "Users") {
+                                int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                if (absIndex < totalCount) {
+                                    var target = listToRender[absIndex];
+                                    int sid = GetInt(target, "SessionId");
+                                    var queue = syncHash["LogoffQueue"];
+                                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { sid });
+                                }
+                            }
+                            else if (key == ConsoleKey.R && activeMode == "History" && !loadingHistory) {
+                                historyList = null;
+                                loadingHistory = false;
+                                historyConfigured = false;
+                                syncHash["HistoryData"] = null;
+                                syncHash["HistoryError"] = null;
+                                syncHash["ActionStatus"] = "";
+                                Console.Clear();
+                            }
+                            else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
+                                int choice = (int)key - (int)ConsoleKey.D1;
+                                if (choice < colHeaders.Length) {
+                                    if (selColIndex == choice) {
+                                        isDesc = !isDesc;
+                                    } else {
+                                        selColIndex = choice;
+                                        isDesc = (activeMode == "Processes" && (choice == 2 || choice == 3)) || (activeMode == "History" && choice == 0);
                                     }
                                 }
                             }
                         }
-                        else if (key == ConsoleKey.T) {
-                            int absIndex = (pageIndex * currentPageSize) + selectedRow;
-                            if (absIndex < totalCount) {
-                                var target = listToRender[absIndex];
-                                if (activeMode == "Services") {
-                                    string currentStatus = GetString(target, "Status");
-                                    string action = (currentStatus == "Running") ? "Stop" : "Start";
-                                    var queue = syncHash["ServiceQueue"];
-                                    var actHash = new Hashtable();
-                                    actHash["Name"] = GetString(target, "Name");
-                                    actHash["Action"] = action;
-                                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                    }
+                    // --- MOUSE EVENT HANDLING ---
+                    else if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseRightClick || evt.Type == InputEventType.MouseDoubleClick || evt.Type == InputEventType.MouseScrollUp || evt.Type == InputEventType.MouseScrollDown || evt.Type == InputEventType.MouseMove) {
+                        int mx = evt.MouseX;
+                        int my = evt.MouseY;
+                        hoverMx = mx;
+                        hoverMy = my;
+
+                        // Right-Click Context Menu trigger on Process grid row
+                        if (evt.Type == InputEventType.MouseRightClick && activeMode == "Processes") {
+                            int clickedRow = my - (headerHeight + 2);
+                            if (clickedRow >= 0 && clickedRow < itemsOnPage && clickedRow < totalCount) {
+                                selectedRow = clickedRow;
+                                int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                if (listToRender != null && absIndex < listToRender.Count) {
+                                    var target = listToRender[absIndex];
+                                    contextMenuPid = GetInt(target, "IDProcess");
+                                    contextMenuName = GetString(target, "Name");
+                                    paused = true;
+                                    if (frozenProcessList == null) {
+                                        var raw = GetProcessList(syncHash);
+                                        frozenProcessList = new List<object>();
+                                        if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+                                    }
+                                    showContextMenu = true;
+                                    contextMenuX = Math.Min(frameWidth - 36, Math.Max(1, mx));
+                                    contextMenuY = Math.Min(height - 6, Math.Max(1, my));
+                                    Console.Clear();
                                 }
-                                else if (activeMode == "Tasks") {
-                                    string tName = GetString(target, "TaskName");
-                                    var queue = syncHash["TaskQueue"];
-                                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tName });
-                                }
                             }
+                            continue;
                         }
-                        else if (key == ConsoleKey.R && activeMode == "Services") {
-                            int absIndex = (pageIndex * currentPageSize) + selectedRow;
-                            if (absIndex < totalCount) {
-                                var target = listToRender[absIndex];
-                                var queue = syncHash["ServiceQueue"];
-                                var actHash = new Hashtable();
-                                actHash["Name"] = GetString(target, "Name");
-                                actHash["Action"] = "Restart";
-                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
-                            }
-                        }
-                        else if (key == ConsoleKey.K && activeMode == "Processes" && paused) {
-                            int absIndex = (pageIndex * currentPageSize) + selectedRow;
-                            if (absIndex < totalCount) {
-                                var target = listToRender[absIndex];
-                                int pid = GetInt(target, "IDProcess");
-                                var queue = syncHash["KillQueue"];
-                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { pid });
-                            }
-                        }
-                        else if (key == ConsoleKey.L && activeMode == "Users") {
-                            int absIndex = (pageIndex * currentPageSize) + selectedRow;
-                            if (absIndex < totalCount) {
-                                var target = listToRender[absIndex];
-                                int sid = GetInt(target, "SessionId");
-                                var queue = syncHash["LogoffQueue"];
-                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { sid });
-                            }
-                        }
-                        else if (key == ConsoleKey.R && activeMode == "History" && !loadingHistory) {
-                            historyList = null;
-                            loadingHistory = false;
-                            historyConfigured = false;
-                            syncHash["HistoryData"] = null;
-                            syncHash["HistoryError"] = null;
-                            syncHash["ActionStatus"] = "";
-                            Console.Clear();
-                        }
-                        else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
-                            int choice = (int)key - (int)ConsoleKey.D1;
-                            if (choice < colHeaders.Length) {
-                                if (selColIndex == choice) {
-                                    isDesc = !isDesc;
+
+                        // Context Menu Overlay Interaction
+                        if (showContextMenu) {
+                            if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                int boxW = 34, boxH = 5;
+                                int startX = Math.Min(frameWidth - boxW, Math.Max(1, contextMenuX));
+                                int startY = Math.Min(height - boxH - 2, Math.Max(1, contextMenuY));
+
+                                if (mx >= startX && mx <= startX + boxW) {
+                                    if (my == startY + 1 && contextMenuPid > 0) {
+                                        var queue = syncHash["KillQueue"];
+                                        queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { contextMenuPid });
+                                        syncHash["ActionStatus"] = string.Format("Sent kill signal for PID {0} ({1})", contextMenuPid, contextMenuName);
+                                        showContextMenu = false;
+                                        Console.Clear();
+                                    }
+                                    else if (my == startY + 2) {
+                                        paused = !paused;
+                                        if (paused) {
+                                            var raw = GetProcessList(syncHash);
+                                            frozenProcessList = new List<object>();
+                                            if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+                                            syncHash["ActionStatus"] = "Process list PAUSED (Frozen for safe process killing)";
+                                        } else {
+                                            frozenProcessList = null;
+                                            syncHash["ActionStatus"] = "Process list RESUMED (Live metrics active)";
+                                        }
+                                        showContextMenu = false;
+                                        Console.Clear();
+                                    }
+                                    else if (my == startY + 3) {
+                                        showContextMenu = false;
+                                        Console.Clear();
+                                    }
                                 } else {
-                                    selColIndex = choice;
-                                    isDesc = (activeMode == "Processes" && (choice == 2 || choice == 3)) || (activeMode == "History" && choice == 0);
+                                    showContextMenu = false;
+                                    Console.Clear();
                                 }
                             }
+                            continue;
+                        }
+
+                        // 1. Mouse Scroll Wheel (Scrolls list selection or pages anywhere in table views)
+                        if (evt.Type == InputEventType.MouseScrollUp) {
+                            if (selectedRow > 0) selectedRow--;
+                            else if (pageIndex > 0) { pageIndex--; selectedRow = Math.Max(0, itemsOnPage - 1); }
+                            continue;
+                        }
+                        if (evt.Type == InputEventType.MouseScrollDown) {
+                            if (selectedRow < (itemsOnPage - 1)) selectedRow++;
+                            else if (pageIndex < (maxPages - 1)) { pageIndex++; selectedRow = 0; }
+                            continue;
+                        }
+
+                        // 2. Disconnect Overlay Interaction
+                        if (ToBool(syncHash["Disconnected"])) {
+                            if (evt.Type == InputEventType.MouseClick && my >= height - 3) {
+                                syncHash["Running"] = false;
+                            }
+                            continue;
+                        }
+
+                        // 3. Main Menu Overlay Interaction (Dropdown beneath [≡ Menu])
+                        if (showMainMenu) {
+                            int boxW = 36;
+                            int startX = 1;
+                            int startY = 1;
+
+                            if (evt.Type == InputEventType.MouseMove) {
+                                if (mx >= startX && mx <= startX + boxW && my >= startY + 1 && my <= startY + 7) {
+                                    menuSelectedIndex = my - (startY + 1);
+                                }
+                            }
+                            else if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                if (my == 0 && mx >= 1 && mx <= 9) {
+                                    continue;
+                                }
+                                if (mx >= startX && mx <= startX + boxW && my >= startY + 1 && my <= startY + 7) {
+                                    int choice = my - (startY + 1);
+                                    if (choice == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
+                                    else if (choice == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
+                                    else if (choice == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
+                                    else if (choice == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
+                                    else if (choice == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
+                                    else if (choice == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
+                                    else if (choice == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
+
+                                    showMainMenu = false;
+                                    selectedRow = 0;
+                                    pageIndex = 0;
+                                    filterText = "";
+                                    Console.Clear();
+                                }
+                                else {
+                                    showMainMenu = false;
+                                    Console.Clear();
+                                }
+                            }
+                            continue;
+                        }
+
+                        // 4. Detail Popups Interactions (Service Props, Task Props, History Detail)
+                        if (showServiceProps) {
+                            if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                int boxW = Math.Min(70, frameWidth - 4), boxH = 14;
+                                int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
+                                if (my == startY + boxH - 1) {
+                                    if (mx >= startX + 3 && mx <= startX + 14) { showServiceProps = false; Console.Clear(); }
+                                    else if (mx >= startX + 16 && mx <= startX + 32) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount) {
+                                            var target = listToRender[absIndex];
+                                            string currentStatus = GetString(target, "Status");
+                                            string action = (currentStatus == "Running") ? "Stop" : "Start";
+                                            var queue = syncHash["ServiceQueue"];
+                                            var actHash = new Hashtable();
+                                            actHash["Name"] = GetString(target, "Name");
+                                            actHash["Action"] = action;
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                                        }
+                                    }
+                                    else if (mx >= startX + 34 && mx <= startX + 48) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount) {
+                                            var target = listToRender[absIndex];
+                                            var queue = syncHash["ServiceQueue"];
+                                            var actHash = new Hashtable();
+                                            actHash["Name"] = GetString(target, "Name");
+                                            actHash["Action"] = "Restart";
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                                        }
+                                    }
+                                }
+                                else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
+                                    showServiceProps = false; Console.Clear();
+                                }
+                            }
+                            continue;
+                        }
+
+                        if (showTaskProps) {
+                            if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                int boxW = Math.Min(70, frameWidth - 4), boxH = 14;
+                                int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
+                                if (my == startY + boxH - 1) {
+                                    if (mx >= startX + 3 && mx <= startX + 14) { showTaskProps = false; Console.Clear(); }
+                                    else if (mx >= startX + 16 && mx <= startX + 30) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount) {
+                                            var target = listToRender[absIndex];
+                                            string tName = GetString(target, "TaskName");
+                                            var queue = syncHash["TaskQueue"];
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tName });
+                                        }
+                                    }
+                                }
+                                else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
+                                    showTaskProps = false; Console.Clear();
+                                }
+                            }
+                            continue;
+                        }
+
+                        if (showHistoryDetail) {
+                            if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                int boxW = Math.Min(80, frameWidth - 4), boxH = 13;
+                                int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
+                                if ((my == startY + boxH && mx >= startX + 2 && mx <= startX + 15) || (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH)) {
+                                    showHistoryDetail = false; Console.Clear();
+                                }
+                            }
+                            continue;
+                        }
+
+                        // 5. Top Menu Bar Click (Row 0) -> [≡ Menu] Button & View Tabs
+                        if (my == 0 && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
+                            if (mx >= 1 && mx <= 9) { // Click on [≡ Menu] button
+                                showMainMenu = !showMainMenu;
+                                menuSelectedIndex = 0;
+                                Console.Clear();
+                            } else { // Click on view tabs
+                                string[] modeTabNames = new string[] { "Processes", "Services", "Tasks", "Apps", "Users", "SpeedTest", "History" };
+                                int curTabX = 11;
+                                for (int m = 0; m < modeTabNames.Length; m++) {
+                                    string mName = modeTabNames[m];
+                                    int tabW = mName.Length + 2; // " Name "
+                                    if (mx >= curTabX && mx < curTabX + tabW) {
+                                        if (m == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
+                                        else if (m == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
+                                        else if (m == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
+                                        else if (m == 3) { activeMode = "Apps"; selColIndex = 0; isDesc = false; }
+                                        else if (m == 4) { activeMode = "Users"; selColIndex = 0; isDesc = false; }
+                                        else if (m == 5) { activeMode = "SpeedTest"; speedTestRowIndex = 0; }
+                                        else if (m == 6) { activeMode = "History"; selColIndex = 0; isDesc = true; }
+
+                                        showMainMenu = false;
+                                        selectedRow = 0;
+                                        pageIndex = 0;
+                                        filterText = "";
+                                        Console.Clear();
+                                        break;
+                                    }
+                                    curTabX += tabW + 2;
+                                }
+                            }
+                            continue;
+                        }
+
+                        // 6. Speed Test View Click Interactions
+                        if (activeMode == "SpeedTest") {
+                            if (ToBool(st["Running"])) continue;
+                            int startBtnIdx = isLocal ? 3 : 4;
+                            if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                int stRow = my - (headerHeight + 4);
+                                if (stRow == 0) {
+                                    speedTestRowIndex = 0;
+                                    if (!isLocal) {
+                                        string currentMode = GetString(st["TestMode"]) == "Remote" ? "P2P" : "Remote";
+                                        st["TestMode"] = currentMode;
+                                    }
+                                }
+                                else if (stRow == 1) {
+                                    speedTestRowIndex = 1;
+                                    if (mx > 40) {
+                                        int thr = ToInt(st["Threads"], 8);
+                                        if (thr < 64) st["Threads"] = thr + 1;
+                                    } else if (mx < 25) {
+                                        int thr = ToInt(st["Threads"], 8);
+                                        if (thr > 1) st["Threads"] = thr - 1;
+                                    }
+                                }
+                                else if (stRow == 2) {
+                                    speedTestRowIndex = 2;
+                                    if (mx > 40) {
+                                        int timeout = ToInt(st["TimeoutSeconds"], 15);
+                                        if (timeout < 120) st["TimeoutSeconds"] = timeout + 1;
+                                    } else if (mx < 25) {
+                                        int timeout = ToInt(st["TimeoutSeconds"], 15);
+                                        if (timeout > 5) st["TimeoutSeconds"] = timeout - 1;
+                                    }
+                                }
+                                else if (stRow == 3 && !isLocal && GetString(st["TestMode"]) == "P2P") {
+                                    speedTestRowIndex = 3;
+                                }
+                                else if (stRow == startBtnIdx) {
+                                    speedTestRowIndex = startBtnIdx;
+                                    st["Running"] = true;
+                                    st["ActivePhase"] = "Latency";
+                                    st["ProgressPercent"] = 0.0;
+                                    var res = st["Results"] as IDictionary;
+                                    res["Latency"] = null;
+                                    res["Download"] = null;
+                                    res["Upload"] = null;
+                                    res["Error"] = "";
+
+                                    speedTestPS = PowerShell.Create();
+                                    speedTestPS.AddScript(stWorkerScript)
+                                               .AddArgument(syncHash)
+                                               .AddArgument(initNetEngineScript)
+                                               .AddArgument(computerName);
+                                    speedTestAsyncHandle = speedTestPS.BeginInvoke();
+                                }
+                            }
+                            continue;
+                        }
+
+                        // 7. History Timeframe Selector Interactions
+                        if (activeMode == "History" && !historyConfigured) {
+                            if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                int pRow = my - (headerHeight + 4);
+                                if (pRow == 0) { historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
+                                else if (pRow == 1) { historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
+                                else if (pRow == 2) { historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
+                                else if (pRow == 3) { historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
+                                else if (pRow == 4) { historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
+                                else if (pRow == 5) {
+                                    Console.CursorVisible = true;
+                                    Console.SetCursorPosition(0, height - 1);
+                                    Console.Write("\x1b[36m ENTER CUSTOM DAYS (1-365): \x1b[0m");
+                                    string inputDays = Console.ReadLine();
+                                    int parsedDays;
+                                    if (int.TryParse(inputDays, out parsedDays) && parsedDays >= 1 && parsedDays <= 365) {
+                                        historyDays = parsedDays;
+                                        historyConfigured = true;
+                                        historyList = null;
+                                        syncHash["HistoryData"] = null;
+                                    }
+                                    Console.CursorVisible = false;
+                                    Console.SetCursorPosition(0, 0);
+                                    Console.Clear();
+                                }
+                            }
+                            continue;
+                        }
+
+                        // 8a. Page Navigation & Pause Header Bar Click (Row headerHeight)
+                        if ((my == headerHeight || my == headerHeight - 1) && activeMode != "SpeedTest" && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
+                            if (mx >= 1 && mx <= 9) { // ◄ PREV button
+                                if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
+                            } else if (mx >= 20 && mx <= 29) { // NEXT ► button
+                                if (pageIndex < maxPages - 1) { pageIndex++; selectedRow = 0; }
+                            } else if (activeMode == "Processes" && mx >= 30 && mx <= 52) { // [⏸ PAUSE TO KILL] / [▶ RESUME UPDATES] button
+                                paused = !paused;
+                                if (paused) {
+                                    var raw = GetProcessList(syncHash);
+                                    frozenProcessList = new List<object>();
+                                    if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+                                    syncHash["ActionStatus"] = "Process list PAUSED (Frozen for safe process killing)";
+                                } else {
+                                    frozenProcessList = null;
+                                    syncHash["ActionStatus"] = "Process list RESUMED (Live metrics active)";
+                                }
+                            }
+                            continue;
+                        }
+
+                        // 8b. Column Header Sorting Click (Row headerHeight + 1)
+                        if ((my == headerHeight + 1 || my == headerHeight) && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
+                            int curX = 2;
+                            for (int c = 0; c < colHeaders.Length; c++) {
+                                int cW = colWidths[c];
+                                if (mx >= curX && mx < curX + cW) {
+                                    if (selColIndex == c) {
+                                        isDesc = !isDesc;
+                                    } else {
+                                        selColIndex = c;
+                                        isDesc = (activeMode == "Processes" && (c == 2 || c == 3)) || (activeMode == "History" && c == 0);
+                                    }
+                                    break;
+                                }
+                                curX += cW + 1;
+                            }
+                            continue;
+                        }
+
+                        // 9. Table Grid Row Click & Double Click
+                        if (my >= headerHeight + 2 && my < headerHeight + 2 + itemsOnPage && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
+                            int clickedRow = my - (headerHeight + 2);
+                            selectedRow = clickedRow;
+                            if (evt.Type == InputEventType.MouseDoubleClick) {
+                                if (activeMode == "Services") showServiceProps = true;
+                                else if (activeMode == "Tasks") showTaskProps = true;
+                                else if (activeMode == "History") showHistoryDetail = true;
+                            }
+                            continue;
+                        }
+
+                        // 10. Footer Action Bar Click
+                        if (my >= height - totalFooterHeight - 1 && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
+                            // Determine relative item clicked from centered footerLine1 or footerLine2
+                            int targetRow = my - (height - footerLinesCount);
+                            List<string> rowItems = new List<string>();
+                            int startPad = 0;
+                            if (footerLinesCount == 1 || targetRow == 0) {
+                                rowItems = r1;
+                                startPad = Math.Max(0, (frameWidth - GetVisibleLength(footerLine1)) / 2);
+                            } else {
+                                rowItems = r2;
+                                startPad = Math.Max(0, (frameWidth - GetVisibleLength(footerLine2)) / 2);
+                            }
+
+                            int curX = startPad + 1;
+                            for (int fi = 0; fi < rowItems.Count; fi++) {
+                                string itemRaw = System.Text.RegularExpressions.Regex.Replace(rowItems[fi], @"\x1b\[[0-9;]*m", "");
+                                int itemLen = itemRaw.Length;
+                                if (mx >= curX && mx < curX + itemLen + 3) {
+                                    if (itemRaw.IndexOf("Search", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        Console.CursorVisible = true;
+                                        Console.SetCursorPosition(0, height - 1);
+                                        Console.Write("\x1b[36m SEARCH: \x1b[0m");
+                                        string search = Console.ReadLine();
+                                        filterText = search != null ? search.Trim() : "";
+                                        pageIndex = 0; selectedRow = 0;
+                                        Console.CursorVisible = false; Console.SetCursorPosition(0, 0);
+                                    }
+                                    else if (itemRaw.IndexOf("Props", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        if (activeMode == "Services") showServiceProps = true;
+                                        else if (activeMode == "Tasks") showTaskProps = true;
+                                    }
+                                    else if (itemRaw.IndexOf("Pause", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("Resume", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        paused = !paused; selectedRow = 0; pageIndex = 0; selColIndex = 2; isDesc = true;
+                                        syncHash["ActionStatus"] = ""; filterText = "";
+                                        if (paused) {
+                                            var raw = GetProcessList(syncHash);
+                                            frozenProcessList = new List<object>();
+                                            if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+                                        }
+                                    }
+                                    else if (itemRaw.IndexOf("Start", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("Toggle", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount) {
+                                            var target = listToRender[absIndex];
+                                            if (activeMode == "Services") {
+                                                string currentStatus = GetString(target, "Status");
+                                                string action = (currentStatus == "Running") ? "Stop" : "Start";
+                                                var queue = syncHash["ServiceQueue"];
+                                                var actHash = new Hashtable();
+                                                actHash["Name"] = GetString(target, "Name");
+                                                actHash["Action"] = action;
+                                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                                            }
+                                            else if (activeMode == "Tasks") {
+                                                string tName = GetString(target, "TaskName");
+                                                var queue = syncHash["TaskQueue"];
+                                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tName });
+                                            }
+                                        }
+                                    }
+                                    else if (itemRaw.IndexOf("Restart", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount && activeMode == "Services") {
+                                            var target = listToRender[absIndex];
+                                            var queue = syncHash["ServiceQueue"];
+                                            var actHash = new Hashtable();
+                                            actHash["Name"] = GetString(target, "Name");
+                                            actHash["Action"] = "Restart";
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+                                        }
+                                    }
+                                    else if (itemRaw.IndexOf("Kill", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount && activeMode == "Processes") {
+                                            var target = listToRender[absIndex];
+                                            int pid = GetInt(target, "IDProcess");
+                                            string pName = GetString(target, "Name");
+                                            paused = true;
+                                            if (frozenProcessList == null) {
+                                                var raw = GetProcessList(syncHash);
+                                                frozenProcessList = new List<object>();
+                                                if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+                                            }
+                                            var queue = syncHash["KillQueue"];
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { pid });
+                                            syncHash["ActionStatus"] = string.Format("Sent kill signal for PID {0} ({1})", pid, pName);
+                                        }
+                                    }
+                                    else if (itemRaw.IndexOf("Logoff", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                        if (absIndex < totalCount && activeMode == "Users") {
+                                            var target = listToRender[absIndex];
+                                            int sid = GetInt(target, "SessionId");
+                                            var queue = syncHash["LogoffQueue"];
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { sid });
+                                        }
+                                    }
+                                    else if (itemRaw.IndexOf("Menu", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        showMainMenu = true; menuSelectedIndex = 0; Console.Clear();
+                                    }
+                                    else if (itemRaw.IndexOf("Quit", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        syncHash["Running"] = false;
+                                    }
+                                    else if (itemRaw.IndexOf("Back", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("ESC", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        if (showMainMenu) showMainMenu = false;
+                                        else if (showServiceProps) showServiceProps = false;
+                                        else if (showTaskProps) showTaskProps = false;
+                                        else if (showHistoryDetail) showHistoryDetail = false;
+                                        else { activeMode = "Processes"; showMainMenu = false; }
+                                        Console.Clear();
+                                    }
+                                    else if (itemRaw.IndexOf("PREV", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("◄", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
+                                    }
+                                    else if (itemRaw.IndexOf("NEXT", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("►", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        if (pageIndex < maxPages - 1) { pageIndex++; selectedRow = 0; }
+                                    }
+                                    else if (itemRaw.IndexOf("Page", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("<-", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                        if (mx < curX + (itemLen / 2)) {
+                                            if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
+                                        } else {
+                                            if (pageIndex < maxPages - 1) { pageIndex++; selectedRow = 0; }
+                                        }
+                                    }
+                                    break;
+                                }
+                                curX += itemLen + 5;
+                            }
+                            continue;
                         }
                     }
                 }
@@ -1682,6 +2609,13 @@ namespace OmniAdmin {
             
             try { if (speedTestPS != null) speedTestPS.Dispose(); } catch {}
             try { if (historyPS != null) historyPS.Dispose(); } catch {}
+
+            if (!hasConsoleMode) {
+                try { Console.Write("\x1b[?1000l\x1b[?1006l"); } catch {}
+            }
+            if (hasConsoleMode) {
+                try { SetConsoleMode(hInput, origConsoleMode); } catch {}
+            }
 
             Console.Write("\x1b[?1049l"); // Restore Main Screen Buffer
             Console.CursorVisible = true;
