@@ -199,6 +199,7 @@ namespace OmniAdmin {
             bool historyConfigured = false; // true once user has chosen timeframe and started fetch
 
             Console.CursorVisible = false;
+            Console.Write("\x1b[?1049h\x1b[H"); // Enable Alternate Screen Buffer (prevents scrollback buffer memory bloat)
             Console.Clear();
 
             int lastWidth = Console.WindowWidth;
@@ -385,6 +386,7 @@ namespace OmniAdmin {
                             string bhScript = GetString(syncHash["BrowserHistoryScript"]);
                             string b64Path  = GetString(syncHash["SqliteB64Path"]);
                             if (!string.IsNullOrEmpty(bhScript)) {
+                                try { if (historyPS != null) historyPS.Dispose(); } catch {}
                                 historyPS = PowerShell.Create();
                                 string prefixScript = string.Format("$global:OAD_SqliteB64Path = '{0}';\n", b64Path.Replace("'", "''"));
                                 historyPS.AddScript(prefixScript + bhScript + string.Format("\nGet-BrowserHistory -ComputerName $args[0] -Credential $args[1] -AllUsers -Hours {0}", historyDays * 24));
@@ -1681,6 +1683,7 @@ namespace OmniAdmin {
             try { if (speedTestPS != null) speedTestPS.Dispose(); } catch {}
             try { if (historyPS != null) historyPS.Dispose(); } catch {}
 
+            Console.Write("\x1b[?1049l"); // Restore Main Screen Buffer
             Console.CursorVisible = true;
             Console.Clear();
         }
