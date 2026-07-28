@@ -1,0 +1,392 @@
+warning: in the working copy of 'Private/TuiEngine.cs', LF will be replaced by CRLF the next time Git touches it
+diff --git a/Private/TuiEngine.cs b/Private/TuiEngine.cs
+index 03f3615..16586fe 100644
+--- a/Private/TuiEngine.cs
++++ b/Private/TuiEngine.cs
+@@ -2,6 +2,7 @@ using System;
+ using System.Text;
+ using System.Collections;
+ using System.Collections.Generic;
++using System.Linq;
+ using System.Threading;
+ using System.Management.Automation;
+ using System.Runtime.InteropServices;
+@@ -667,59 +668,56 @@ namespace OmniAdmin {
+                 int statsBoxHeight = (staticData != null && GetProperty(staticData, "GpuName") != null) ? 10 : 9;
+                 if (diagnostics) statsBoxHeight += 1;
+ 
+-                int totalHeaderHeight = statsBoxHeight + 4; // Top Menu (1) + Sep (1) + Stats Box (statsBoxHeight) + Nav Bar (1) + Col Headers (1)
++                int totalHeaderHeight = statsBoxHeight + 5; // Top Menu (1) + Sep (1) + Stats Box (statsBoxHeight) + Nav Bar (1) + Col Headers (1)
+                 int headerHeight = totalHeaderHeight - 2;
+ 
+                 // Resolve Footer Items
+                 string[] footerItems = new string[0];
+                 if (activeMode == "Processes") {
+                     footerItems = new string[] {
++                        "\x1b[36;1m[Γû▓/Γû╝]\x1b[0m Row",
++                        "\x1b[36;1m[Γùä/Γû║]\x1b[0m Page",
+                         "\x1b[36;1m[S]\x1b[0m Search",
+-                        "\x1b[36;1m[1-6]\x1b[0m Sort",
+                         "\x1b[36;1m[K]\x1b[0m Kill",
+-                        "\x1b[1;37;44m Γùä PREV \x1b[0m",
+-                        "\x1b[1;37;44m NEXT Γû║ \x1b[0m",
+                         "\x1b[36;1m[P]\x1b[0m " + (paused ? "\x1b[43;30;1m[Γû╢ RESUME UPDATES]\x1b[0m" : "\x1b[41;37;1m[ΓÅ╕ PAUSE TO KILL]\x1b[0m"),
+                         "\x1b[36;1m[M]\x1b[0m Menu",
+                         "\x1b[36;1m[Q]\x1b[0m Quit"
+                     };
+                 } else if (activeMode == "Services") {
+                     footerItems = new string[] {
++                        "\x1b[33;1m[Γû▓/Γû╝]\x1b[0m Row",
++                        "\x1b[33;1m[Γùä/Γû║]\x1b[0m Page",
+                         "\x1b[33;1m[S]\x1b[0m Search",
+                         "\x1b[33;1m[P]\x1b[0m Props",
+                         "\x1b[33;1m[T]\x1b[0m Start/Stop",
+                         "\x1b[33;1m[R]\x1b[0m Restart",
+-                        "\x1b[1;37;44m Γùä PREV \x1b[0m",
+-                        "\x1b[1;37;44m NEXT Γû║ \x1b[0m",
+                         "\x1b[33;1m[M]\x1b[0m Menu",
+                         "\x1b[33;1m[ESC]\x1b[0m Back"
+                     };
+                 } else if (activeMode == "Tasks") {
+                     footerItems = new string[] {
++                        "\x1b[36;1m[Γû▓/Γû╝]\x1b[0m Row",
++                        "\x1b[36;1m[Γùä/Γû║]\x1b[0m Page",
+                         "\x1b[36;1m[S]\x1b[0m Search",
+-                        "\x1b[36;1m[T]\x1b[0m Toggle Run",
++                        "\x1b[36;1m[T]\x1b[0m Run",
+                         "\x1b[36;1m[P]\x1b[0m Props",
+-                        "\x1b[36;1m[1-4]\x1b[0m Sort",
+-                        "\x1b[1;37;44m Γùä PREV \x1b[0m",
+-                        "\x1b[1;37;44m NEXT Γû║ \x1b[0m",
+                         "\x1b[36;1m[M]\x1b[0m Menu",
+                         "\x1b[36;1m[ESC]\x1b[0m Back"
+                     };
+                 } else if (activeMode == "Apps") {
+                     footerItems = new string[] {
++                        "\x1b[32;1m[Γû▓/Γû╝]\x1b[0m Row",
++                        "\x1b[32;1m[Γùä/Γû║]\x1b[0m Page",
+                         "\x1b[32;1m[S]\x1b[0m Search",
+-                        "\x1b[32;1m[1-5]\x1b[0m Sort",
+-                        "\x1b[1;37;44m Γùä PREV \x1b[0m",
+-                        "\x1b[1;37;44m NEXT Γû║ \x1b[0m",
+                         "\x1b[32;1m[M]\x1b[0m Menu",
+                         "\x1b[32;1m[ESC]\x1b[0m Back"
+                     };
+                 } else if (activeMode == "Users") {
+                     footerItems = new string[] {
++                        "\x1b[35;1m[Γû▓/Γû╝]\x1b[0m Row",
++                        "\x1b[35;1m[Γùä/Γû║]\x1b[0m Page",
+                         "\x1b[35;1m[S]\x1b[0m Search",
+-                        "\x1b[35;1m[L]\x1b[0m Logoff User",
+-                        "\x1b[1;37;44m Γùä PREV \x1b[0m",
+-                        "\x1b[1;37;44m NEXT Γû║ \x1b[0m",
++                        "\x1b[35;1m[L]\x1b[0m Logoff",
+                         "\x1b[35;1m[M]\x1b[0m Menu",
+                         "\x1b[35;1m[ESC]\x1b[0m Back"
+                     };
+@@ -727,11 +725,13 @@ namespace OmniAdmin {
+                     if (ToBool(st["Running"])) {
+                         footerItems = new string[] { "\x1b[33;1mTesting in progress... Please do not close or resize the terminal.\x1b[0m" };
+                     } else {
+-                        footerItems = new string[] { "\x1b[36;1m[UpDown]\x1b[0m Select", "\x1b[36;1m[<-/->]\x1b[0m Adjust", "\x1b[36;1m[Enter]\x1b[0m Start", "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[ESC]\x1b[0m Back" };
++                        footerItems = new string[] { "\x1b[36;1m[Γû▓/Γû╝]\x1b[0m Select", "\x1b[36;1m[Γùä/Γû║]\x1b[0m Adjust", "\x1b[36;1m[Enter]\x1b[0m Start", "\x1b[36;1m[M]\x1b[0m Menu", "\x1b[36;1m[ESC]\x1b[0m Back" };
+                     }
+                 } else if (activeMode == "History") {
+                     if (!historyConfigured)
+                         footerItems = new string[] { "\x1b[94;1m[1]\x1b[0m 1d", "\x1b[94;1m[2]\x1b[0m 7d", "\x1b[94;1m[3]\x1b[0m 14d", "\x1b[94;1m[4]\x1b[0m 30d", "\x1b[94;1m[5]\x1b[0m 90d", "\x1b[94;1m[C]\x1b[0m Custom", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
++                    else
++                        footerItems = new string[] { "\x1b[94;1m[Γû▓/Γû╝]\x1b[0m Row", "\x1b[94;1m[Γùä/Γû║]\x1b[0m Page", "\x1b[94;1m[S]\x1b[0m Search", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
+                 }
+ 
+                 string singleLineFooter = " " + string.Join("  \x1b[90mΓöé\x1b[0m  ", footerItems);
+@@ -766,7 +766,9 @@ namespace OmniAdmin {
+                         r2.Add(footerItems[itemIdx]);
+                         itemIdx++;
+                     }
+-                    footerLine1 = " " + string.Join("  \x1b[90mΓöé\x1b[0m  ", r1.ToArray());
++                }
++                footerLine1 = " " + string.Join("  \x1b[90mΓöé\x1b[0m  ", r1.ToArray());
++                if (footerLinesCount == 2) {
+                     footerLine2 = " " + string.Join("  \x1b[90mΓöé\x1b[0m  ", r2.ToArray());
+                 }
+ 
+@@ -777,7 +779,7 @@ namespace OmniAdmin {
+ 
+                 // --- BUILD BUFFER ---
+                 StringBuilder sb = new StringBuilder();
+-                sb.Append("\x1b[H\x1b[0m"); // Cursor to Home + full color reset to prevent first-row color bleed
++                sb.Append("\x1b[?25l\x1b[H\x1b[0m"); // Hide cursor + Cursor to Home + full color reset to prevent first-row color bleed
+ 
+                 // --- RESOLVE DATA GRID ---
+                 List<object> listToRender = new List<object>();
+@@ -1041,7 +1043,7 @@ namespace OmniAdmin {
+                         sb.Append(FormatBoxLine("", frameWidth, themeColor));
+                     }
+                 } else {
+-                    int lines = (staticData != null && GetProperty(staticData, "GpuName") != null) ? 10 : 7;
++                    int lines = statsBoxHeight - 2; // inner lines only (excludes box top Γöî and bottom Γöö)
+                     for (int l = 0; l < lines; l++) {
+                         sb.Append(FormatBoxLine("", frameWidth, themeColor));
+                     }
+@@ -1538,7 +1540,6 @@ namespace OmniAdmin {
+                         }
+                     }
+                 }
+-                }
+ 
+                 // 3. Footer Separator and Menu Bar
+                 sb.Append("\x1b[90m" + new string('ΓöÇ', frameWidth) + "\x1b[0m\n");
+@@ -1705,17 +1706,10 @@ namespace OmniAdmin {
+ 
+                 // 4. Main Menu Overlay (Dropdown beneath [Γëí Menu] button)
+                 if (showMainMenu) {
+-                    int boxW = 36, boxH = 10;
++                    int boxW = 36;
+                     int startX = 1;
+                     int startY = 1;
+ 
+-                    for (int y = 0; y <= boxH; y++) {
+-                        sb.Append(string.Format("\x1b[{0};{1}H", startY + y + 1, startX + 1));
+-                        sb.Append("\x1b[37;44m" + new string(' ', boxW) + "\x1b[0m");
+-                    }
+-
+-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[1;37;44m Γëí NAVIGATION MENU \x1b[0m", startY + 1, startX + 2));
+-                    
+                     string[] items = new string[] {
+                         "  [1] Live Processes",
+                         "  [2] Service Manager",
+@@ -1726,14 +1720,20 @@ namespace OmniAdmin {
+                         "  [7] Browser History"
+                     };
+ 
++                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44mΓöîΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÉ\x1b[0m", startY + 1, startX + 1));
++                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44mΓöé \x1b[1mΓëí NAVIGATION MENU\x1b[0;37;44m                Γöé\x1b[0m", startY + 2, startX + 1));
++                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44mΓö£ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöñ\x1b[0m", startY + 3, startX + 1));
++
+                     for (int i = 0; i < items.Length; i++) {
+-                        sb.Append(string.Format("\x1b[{0};{1}H", startY + 3 + i, startX + 2));
++                        sb.Append(string.Format("\x1b[{0};{1}H", startY + 4 + i, startX + 1));
++                        string padItem = items[i].PadRight(boxW - 4);
+                         if (i == menuSelectedIndex) {
+-                            sb.Append(string.Format("\x1b[30;47m{0}\x1b[0m", items[i].PadRight(boxW - 4)));
++                            sb.Append(string.Format("\x1b[37;44mΓöé \x1b[30;47;1m{0}\x1b[0;37;44m Γöé\x1b[0m", padItem));
+                         } else {
+-                            sb.Append(string.Format("\x1b[37;44m{0}\x1b[0m", items[i].PadRight(boxW - 4)));
++                            sb.Append(string.Format("\x1b[37;44mΓöé {0} Γöé\x1b[0m", padItem));
+                         }
+                     }
++                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44mΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ\x1b[0m", startY + 4 + items.Length, startX + 1));
+                 }
+ 
+                 // 5. Process Right-Click Context Menu
+@@ -1797,7 +1797,6 @@ namespace OmniAdmin {
+                                 activeMode = "Processes";
+                                 showMainMenu = false;
+                             }
+-                            Console.Clear();
+                         }
+ 
+                         // --- INPUT HANDLING: MAIN MENU ---
+@@ -1821,7 +1820,6 @@ namespace OmniAdmin {
+                                 selectedRow = 0;
+                                 pageIndex = 0;
+                                 filterText = "";
+-                                Console.Clear();
+                             }
+                             else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
+                                 int choice = (int)key - (int)ConsoleKey.D1;
+@@ -1837,7 +1835,6 @@ namespace OmniAdmin {
+                                 selectedRow = 0;
+                                 pageIndex = 0;
+                                 filterText = "";
+-                                Console.Clear();
+                             }
+                         }
+                         // --- INPUT HANDLING: SPEED TEST MODE ---
+@@ -2192,16 +2189,17 @@ namespace OmniAdmin {
+                             int startY = 1;
+ 
+                             if (evt.Type == InputEventType.MouseMove) {
+-                                if (mx >= startX && mx <= startX + boxW && my >= startY + 1 && my <= startY + 7) {
+-                                    menuSelectedIndex = my - (startY + 1);
++                                if (mx >= startX && mx <= startX + boxW && my >= startY + 3 && my <= startY + 9) {
++                                    menuSelectedIndex = my - (startY + 3);
+                                 }
+                             }
+                             else if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
+                                 if (my == 0 && mx >= 1 && mx <= 9) {
++                                    showMainMenu = false;
+                                     continue;
+                                 }
+-                                if (mx >= startX && mx <= startX + boxW && my >= startY + 1 && my <= startY + 7) {
+-                                    int choice = my - (startY + 1);
++                                if (mx >= startX && mx <= startX + boxW && my >= startY + 3 && my <= startY + 9) {
++                                    int choice = my - (startY + 3);
+                                     if (choice == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
+                                     else if (choice == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
+                                     else if (choice == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
+@@ -2214,11 +2212,9 @@ namespace OmniAdmin {
+                                     selectedRow = 0;
+                                     pageIndex = 0;
+                                     filterText = "";
+-                                    Console.Clear();
+                                 }
+                                 else {
+                                     showMainMenu = false;
+-                                    Console.Clear();
+                                 }
+                             }
+                             continue;
+@@ -2322,7 +2318,6 @@ namespace OmniAdmin {
+                                         selectedRow = 0;
+                                         pageIndex = 0;
+                                         filterText = "";
+-                                        Console.Clear();
+                                         break;
+                                     }
+                                     curTabX += tabW + 2;
+@@ -2470,135 +2465,8 @@ namespace OmniAdmin {
+                             continue;
+                         }
+ 
+-                        // 10. Footer Action Bar Click
++                        // 10. Footer Action Bar (Static keyboard navigation guidance ΓÇö non-clickable)
+                         if (my >= height - totalFooterHeight - 1 && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
+-                            // Determine relative item clicked from centered footerLine1 or footerLine2
+-                            int targetRow = my - (height - footerLinesCount);
+-                            List<string> rowItems = new List<string>();
+-                            int startPad = 0;
+-                            if (footerLinesCount == 1 || targetRow == 0) {
+-                                rowItems = r1;
+-                                startPad = Math.Max(0, (frameWidth - GetVisibleLength(footerLine1)) / 2);
+-                            } else {
+-                                rowItems = r2;
+-                                startPad = Math.Max(0, (frameWidth - GetVisibleLength(footerLine2)) / 2);
+-                            }
+-
+-                            int curX = startPad + 1;
+-                            for (int fi = 0; fi < rowItems.Count; fi++) {
+-                                string itemRaw = System.Text.RegularExpressions.Regex.Replace(rowItems[fi], @"\x1b\[[0-9;]*m", "");
+-                                int itemLen = itemRaw.Length;
+-                                if (mx >= curX && mx < curX + itemLen + 3) {
+-                                    if (itemRaw.IndexOf("Search", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        Console.CursorVisible = true;
+-                                        Console.SetCursorPosition(0, height - 1);
+-                                        Console.Write("\x1b[36m SEARCH: \x1b[0m");
+-                                        string search = Console.ReadLine();
+-                                        filterText = search != null ? search.Trim() : "";
+-                                        pageIndex = 0; selectedRow = 0;
+-                                        Console.CursorVisible = false; Console.SetCursorPosition(0, 0);
+-                                    }
+-                                    else if (itemRaw.IndexOf("Props", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        if (activeMode == "Services") showServiceProps = true;
+-                                        else if (activeMode == "Tasks") showTaskProps = true;
+-                                    }
+-                                    else if (itemRaw.IndexOf("Pause", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("Resume", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        paused = !paused; selectedRow = 0; pageIndex = 0; selColIndex = 2; isDesc = true;
+-                                        syncHash["ActionStatus"] = ""; filterText = "";
+-                                        if (paused) {
+-                                            var raw = GetProcessList(syncHash);
+-                                            frozenProcessList = new List<object>();
+-                                            if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+-                                        }
+-                                    }
+-                                    else if (itemRaw.IndexOf("Start", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("Toggle", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+-                                        if (absIndex < totalCount) {
+-                                            var target = listToRender[absIndex];
+-                                            if (activeMode == "Services") {
+-                                                string currentStatus = GetString(target, "Status");
+-                                                string action = (currentStatus == "Running") ? "Stop" : "Start";
+-                                                var queue = syncHash["ServiceQueue"];
+-                                                var actHash = new Hashtable();
+-                                                actHash["Name"] = GetString(target, "Name");
+-                                                actHash["Action"] = action;
+-                                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+-                                            }
+-                                            else if (activeMode == "Tasks") {
+-                                                string tName = GetString(target, "TaskName");
+-                                                var queue = syncHash["TaskQueue"];
+-                                                queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tName });
+-                                            }
+-                                        }
+-                                    }
+-                                    else if (itemRaw.IndexOf("Restart", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+-                                        if (absIndex < totalCount && activeMode == "Services") {
+-                                            var target = listToRender[absIndex];
+-                                            var queue = syncHash["ServiceQueue"];
+-                                            var actHash = new Hashtable();
+-                                            actHash["Name"] = GetString(target, "Name");
+-                                            actHash["Action"] = "Restart";
+-                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
+-                                        }
+-                                    }
+-                                    else if (itemRaw.IndexOf("Kill", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+-                                        if (absIndex < totalCount && activeMode == "Processes") {
+-                                            var target = listToRender[absIndex];
+-                                            int pid = GetInt(target, "IDProcess");
+-                                            string pName = GetString(target, "Name");
+-                                            paused = true;
+-                                            if (frozenProcessList == null) {
+-                                                var raw = GetProcessList(syncHash);
+-                                                frozenProcessList = new List<object>();
+-                                                if (raw != null) foreach (var p in raw) frozenProcessList.Add(p);
+-                                            }
+-                                            var queue = syncHash["KillQueue"];
+-                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { pid });
+-                                            syncHash["ActionStatus"] = string.Format("Sent kill signal for PID {0} ({1})", pid, pName);
+-                                        }
+-                                    }
+-                                    else if (itemRaw.IndexOf("Logoff", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        int absIndex = (pageIndex * currentPageSize) + selectedRow;
+-                                        if (absIndex < totalCount && activeMode == "Users") {
+-                                            var target = listToRender[absIndex];
+-                                            int sid = GetInt(target, "SessionId");
+-                                            var queue = syncHash["LogoffQueue"];
+-                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { sid });
+-                                        }
+-                                    }
+-                                    else if (itemRaw.IndexOf("Menu", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        showMainMenu = true; menuSelectedIndex = 0; Console.Clear();
+-                                    }
+-                                    else if (itemRaw.IndexOf("Quit", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        syncHash["Running"] = false;
+-                                    }
+-                                    else if (itemRaw.IndexOf("Back", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("ESC", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        if (showMainMenu) showMainMenu = false;
+-                                        else if (showServiceProps) showServiceProps = false;
+-                                        else if (showTaskProps) showTaskProps = false;
+-                                        else if (showHistoryDetail) showHistoryDetail = false;
+-                                        else { activeMode = "Processes"; showMainMenu = false; }
+-                                        Console.Clear();
+-                                    }
+-                                    else if (itemRaw.IndexOf("PREV", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("Γùä", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
+-                                    }
+-                                    else if (itemRaw.IndexOf("NEXT", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("Γû║", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        if (pageIndex < maxPages - 1) { pageIndex++; selectedRow = 0; }
+-                                    }
+-                                    else if (itemRaw.IndexOf("Page", StringComparison.OrdinalIgnoreCase) >= 0 || itemRaw.IndexOf("<-", StringComparison.OrdinalIgnoreCase) >= 0) {
+-                                        if (mx < curX + (itemLen / 2)) {
+-                                            if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
+-                                        } else {
+-                                            if (pageIndex < maxPages - 1) { pageIndex++; selectedRow = 0; }
+-                                        }
+-                                    }
+-                                    break;
+-                                }
+-                                curX += itemLen + 5;
+-                            }
+                             continue;
+                         }
+                     }
+@@ -2621,6 +2489,7 @@ namespace OmniAdmin {
+             Console.CursorVisible = true;
+             Console.Clear();
+         }
++        }
+         
+         public static List<object> GetProcessList(Hashtable syncHash) {
+             var raw = Unwrap(syncHash["RawProcessList"]) as IEnumerable;
