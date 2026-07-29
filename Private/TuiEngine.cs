@@ -456,7 +456,11 @@ namespace OmniAdmin {
 
             Console.CursorVisible = false;
             Console.Write("\x1b[?1049h\x1b[H"); // Enable Alternate Screen Buffer (prevents scrollback buffer memory bloat)
-            Console.Clear();
+
+            string lastFrame = "";
+            bool forceRedraw = true;
+
+            { System.Console.Clear(); forceRedraw = true; }
 
             int lastWidth = Console.WindowWidth;
             int lastHeight = Console.WindowHeight;
@@ -466,7 +470,7 @@ namespace OmniAdmin {
                 int height = Console.WindowHeight;
 
                 if (width != lastWidth || height != lastHeight) {
-                    Console.Clear();
+                    { System.Console.Clear(); forceRedraw = true; }
                     lastWidth = width;
                     lastHeight = height;
                 }
@@ -539,7 +543,7 @@ namespace OmniAdmin {
                 // --- STARTUP CRITICAL ERROR (initial connect failed, raised by worker before TUI painted) ---
                 if (ToBool(syncHash["CriticalError"])) {
                     string lostErr = GetString(syncHash["Error"]);
-                    Console.Clear();
+                    { System.Console.Clear(); forceRedraw = true; }
                     Console.CursorVisible = false;
                     int cw = Console.WindowWidth;
                     string border = new string('═', Math.Max(0, cw - 1));
@@ -569,7 +573,7 @@ namespace OmniAdmin {
                 }
 
                 if (width < 95 || height < 20) {
-                    Console.Clear();
+                    { System.Console.Clear(); forceRedraw = true; }
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine("Terminal too small. Min 95x20.");
                     Thread.Sleep(1000);
@@ -2133,7 +2137,12 @@ namespace OmniAdmin {
                 }
 
                 // --- WRITE COMPLETED BUFFER TO SCREEN ---
-                Console.Write(sb.ToString());
+                string newFrame = sb.ToString();
+                if (forceRedraw || newFrame != lastFrame) {
+                    Console.Write(newFrame);
+                    lastFrame = newFrame;
+                    forceRedraw = false;
+                }
 
                 // --- UNIFIED USER INPUT HANDLER (KEYBOARD & MOUSE) ---
                 var inputEvents = FetchInputEvents(hInput, hasConsoleMode);
@@ -2155,7 +2164,7 @@ namespace OmniAdmin {
                         if (key == ConsoleKey.M) {
                             showMainMenu = !showMainMenu;
                             if (showMainMenu) menuSelectedIndex = 0;
-                            else Console.Clear();
+                            else { System.Console.Clear(); forceRedraw = true; }
                         }
 
                         if (key == ConsoleKey.P || key == ConsoleKey.V) {
@@ -2168,7 +2177,7 @@ namespace OmniAdmin {
                             else if (showHistoryDetail) { showHistoryDetail = false; closedPropBox = true; }
                             
                             if (closedPropBox) {
-                                Console.Clear();
+                                { System.Console.Clear(); forceRedraw = true; }
                                 continue;
                             }
                         }
@@ -2186,7 +2195,7 @@ namespace OmniAdmin {
                                 activeMode = "Processes";
                                 showMainMenu = false;
                             }
-                            Console.Clear();
+                            { System.Console.Clear(); forceRedraw = true; }
                         }
 
                         // --- INPUT HANDLING: MAIN MENU ---
@@ -2210,7 +2219,7 @@ namespace OmniAdmin {
                                 selectedRow = 0;
                                 pageIndex = 0;
                                 filterText = "";
-                                Console.Clear();
+                                { System.Console.Clear(); forceRedraw = true; }
                             }
                             else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
                                 int choice = (int)key - (int)ConsoleKey.D1;
@@ -2226,7 +2235,7 @@ namespace OmniAdmin {
                                 selectedRow = 0;
                                 pageIndex = 0;
                                 filterText = "";
-                                Console.Clear();
+                                { System.Console.Clear(); forceRedraw = true; }
                             }
                         }
                         // --- INPUT HANDLING: SPEED TEST MODE ---
@@ -2341,19 +2350,19 @@ namespace OmniAdmin {
 
                             if (activeMode == "History" && !historyConfigured) {
                                 if (key == ConsoleKey.D1 || key == ConsoleKey.NumPad1) {
-                                    historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                    historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 else if (key == ConsoleKey.D2 || key == ConsoleKey.NumPad2) {
-                                    historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                    historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 else if (key == ConsoleKey.D3 || key == ConsoleKey.NumPad3) {
-                                    historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                    historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 else if (key == ConsoleKey.D4 || key == ConsoleKey.NumPad4) {
-                                    historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                    historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 else if (key == ConsoleKey.D5 || key == ConsoleKey.NumPad5) {
-                                    historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear();
+                                    historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 else if (key == ConsoleKey.C) {
                                     Console.CursorVisible = true;
@@ -2369,7 +2378,7 @@ namespace OmniAdmin {
                                     }
                                     Console.CursorVisible = false;
                                     Console.SetCursorPosition(0, 0);
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 Thread.Sleep(50);
                                 continue;
@@ -2421,7 +2430,7 @@ namespace OmniAdmin {
                                     showHistoryDetail = !showHistoryDetail;
                                 }
                                 if (!showServiceProps && !showTaskProps && !showProcessProps && !showUserProps && !showAppProps && !showHistoryDetail) {
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             else if (key == ConsoleKey.E) {
@@ -2472,8 +2481,12 @@ namespace OmniAdmin {
                                     }
                                     else if (activeMode == "Tasks") {
                                         string tName = GetString(target, "TaskName");
+                                        string tPath = GetString(target, "TaskPath");
                                         var queue = syncHash["TaskQueue"];
-                                        queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tName });
+                                        var tHash = new Hashtable();
+                                        tHash["Name"] = tName;
+                                        tHash["Path"] = tPath;
+                                        queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tHash });
                                     }
                                 }
                             }
@@ -2513,7 +2526,7 @@ namespace OmniAdmin {
                                 syncHash["HistoryData"] = null;
                                 syncHash["HistoryError"] = null;
                                 syncHash["ActionStatus"] = "";
-                                Console.Clear();
+                                { System.Console.Clear(); forceRedraw = true; }
                             }
                             else if (key >= ConsoleKey.D1 && key <= ConsoleKey.D7) {
                                 int choice = (int)key - (int)ConsoleKey.D1;
@@ -2584,7 +2597,7 @@ namespace OmniAdmin {
                                     showContextMenu = true;
                                     contextMenuX = Math.Min(frameWidth - 36, Math.Max(1, mx));
                                     contextMenuY = Math.Min(height - 6, Math.Max(1, my));
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2621,7 +2634,7 @@ namespace OmniAdmin {
                                             queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { contextMenuPid });
                                             syncHash["ActionStatus"] = string.Format("Sent kill signal for PID {0} ({1})", contextMenuPid, contextMenuName);
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 1) {
                                             paused = !paused;
@@ -2635,16 +2648,16 @@ namespace OmniAdmin {
                                                 syncHash["ActionStatus"] = "Process list RESUMED (Live metrics active)";
                                             }
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 2) {
                                             showProcessProps = true;
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 3) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                             var eList = frozenProcessList ?? GetProcessList(syncHash);
                                             if (eList != null) {
                                                 var ps = PowerShell.Create();
@@ -2655,7 +2668,7 @@ namespace OmniAdmin {
                                         }
                                         else if (my == startY + 4) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                     }
                                     else if (contextMenuType == "Service") {
@@ -2668,16 +2681,16 @@ namespace OmniAdmin {
                                             else if (my == startY + 2) actHash["Action"] = "Restart";
                                             queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { actHash });
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 3) {
                                             showServiceProps = true;
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 4) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                             var eList = GetServiceList(syncHash);
                                             if (eList != null) {
                                                 var ps = PowerShell.Create();
@@ -2688,25 +2701,32 @@ namespace OmniAdmin {
                                         }
                                         else if (my == startY + 5) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                     }
                                     else if (contextMenuType == "Task") {
                                         if (my == startY) {
+                                            int absIndex = (pageIndex * currentPageSize) + selectedRow;
+                                            var target = listToRender[absIndex];
+                                            string tName = GetString(target, "TaskName");
+                                            string tPath = GetString(target, "TaskPath");
                                             var queue = syncHash["TaskQueue"];
-                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { contextMenuName });
-                                            syncHash["ActionStatus"] = string.Format("Started task '{0}'", contextMenuName);
+                                            var tHash = new Hashtable();
+                                            tHash["Name"] = tName;
+                                            tHash["Path"] = tPath;
+                                            queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { tHash });
+                                            syncHash["ActionStatus"] = string.Format("Started task '{0}'", tName);
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 1) {
                                             showTaskProps = true;
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 2) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                             var eList = GetTaskList(syncHash);
                                             if (eList != null) {
                                                 var ps = PowerShell.Create();
@@ -2717,7 +2737,7 @@ namespace OmniAdmin {
                                         }
                                         else if (my == startY + 3) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                     }
                                     else if (contextMenuType == "User") {
@@ -2726,16 +2746,16 @@ namespace OmniAdmin {
                                             queue.GetType().GetMethod("Enqueue").Invoke(queue, new object[] { contextMenuPid });
                                             syncHash["ActionStatus"] = string.Format("Sent logoff signal for Session {0} ({1})", contextMenuPid, contextMenuName);
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 1) {
                                             showUserProps = true;
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 2) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                             var eList = GetUserList(syncHash);
                                             if (eList != null) {
                                                 var ps = PowerShell.Create();
@@ -2746,18 +2766,18 @@ namespace OmniAdmin {
                                         }
                                         else if (my == startY + 3) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                     }
                                     else if (contextMenuType == "App") {
                                         if (my == startY) {
                                             showAppProps = true;
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 1) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                             var eList = GetAppList(syncHash);
                                             if (eList != null) {
                                                 var ps = PowerShell.Create();
@@ -2768,18 +2788,18 @@ namespace OmniAdmin {
                                         }
                                         else if (my == startY + 2) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                     }
                                     else if (contextMenuType == "History") {
                                         if (my == startY) {
                                             showHistoryDetail = true;
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                         else if (my == startY + 1) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                             var ps = PowerShell.Create();
                                             ps.AddScript("param($data) $data | Out-GridView -Title 'OmniAdmin History Export'");
                                             ps.AddArgument(historyList);
@@ -2787,12 +2807,12 @@ namespace OmniAdmin {
                                         }
                                         else if (my == startY + 2) {
                                             showContextMenu = false;
-                                            Console.Clear();
+                                            { System.Console.Clear(); forceRedraw = true; }
                                         }
                                     }
                                 } else {
                                     showContextMenu = false;
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2825,18 +2845,18 @@ namespace OmniAdmin {
                             int startY = 1;
 
                             if (evt.Type == InputEventType.MouseMove) {
-                                if (mx >= startX && mx <= startX + boxW && my >= startY + 3 && my <= startY + 9) {
-                                    menuSelectedIndex = my - (startY + 3);
+                                if (mx >= startX && mx <= startX + boxW && my >= startY + 2 && my <= startY + 8) {
+                                    menuSelectedIndex = my - (startY + 2);
                                 }
                             }
                             else if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
                                 if (my == 0 && mx >= 1 && mx <= 9) {
                                     showMainMenu = false;
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                     continue;
                                 }
-                                if (mx >= startX && mx <= startX + boxW && my >= startY + 3 && my <= startY + 9) {
-                                    int choice = my - (startY + 3);
+                                if (mx >= startX && mx <= startX + boxW && my >= startY + 2 && my <= startY + 8) {
+                                    int choice = my - (startY + 2);
                                     if (choice == 0) { activeMode = "Processes"; selColIndex = 2; isDesc = true; }
                                     else if (choice == 1) { activeMode = "Services"; selColIndex = 1; isDesc = false; }
                                     else if (choice == 2) { activeMode = "Tasks"; selColIndex = 1; isDesc = false; }
@@ -2849,11 +2869,11 @@ namespace OmniAdmin {
                                     selectedRow = 0;
                                     pageIndex = 0;
                                     filterText = "";
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                                 else {
                                     showMainMenu = false;
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2865,10 +2885,10 @@ namespace OmniAdmin {
                                 int boxW = 60, boxH = 12;
                                 int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
                                 if (my >= startY + boxH - 2 && my <= startY + boxH + 1) {
-                                    if (mx >= startX && mx <= startX + 22) { showServiceProps = false; Console.Clear(); }
+                                    if (mx >= startX && mx <= startX + 22) { showServiceProps = false; { System.Console.Clear(); forceRedraw = true; } }
                                 }
                                 else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
-                                    showServiceProps = false; Console.Clear();
+                                    showServiceProps = false; { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2879,10 +2899,10 @@ namespace OmniAdmin {
                                 int boxW = 70, boxH = 12;
                                 int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
                                 if (my >= startY + boxH - 2 && my <= startY + boxH + 1) {
-                                    if (mx >= startX && mx <= startX + 22) { showTaskProps = false; Console.Clear(); }
+                                    if (mx >= startX && mx <= startX + 22) { showTaskProps = false; { System.Console.Clear(); forceRedraw = true; } }
                                 }
                                 else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
-                                    showTaskProps = false; Console.Clear();
+                                    showTaskProps = false; { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2893,10 +2913,10 @@ namespace OmniAdmin {
                                 int boxW = Math.Min(width - 4, 110), boxH = 12;
                                 int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
                                 if (my >= startY + boxH - 2 && my <= startY + boxH + 1) {
-                                    if (mx >= startX && mx <= startX + 22) { showProcessProps = false; Console.Clear(); }
+                                    if (mx >= startX && mx <= startX + 22) { showProcessProps = false; { System.Console.Clear(); forceRedraw = true; } }
                                 }
                                 else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
-                                    showProcessProps = false; Console.Clear();
+                                    showProcessProps = false; { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2907,10 +2927,10 @@ namespace OmniAdmin {
                                 int boxW = 60, boxH = 9;
                                 int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
                                 if (my >= startY + boxH - 2 && my <= startY + boxH + 1) {
-                                    if (mx >= startX && mx <= startX + 22) { showUserProps = false; Console.Clear(); }
+                                    if (mx >= startX && mx <= startX + 22) { showUserProps = false; { System.Console.Clear(); forceRedraw = true; } }
                                 }
                                 else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
-                                    showUserProps = false; Console.Clear();
+                                    showUserProps = false; { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2921,10 +2941,10 @@ namespace OmniAdmin {
                                 int boxW = 60, boxH = 9;
                                 int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
                                 if (my >= startY + boxH - 2 && my <= startY + boxH + 1) {
-                                    if (mx >= startX && mx <= startX + 22) { showAppProps = false; Console.Clear(); }
+                                    if (mx >= startX && mx <= startX + 22) { showAppProps = false; { System.Console.Clear(); forceRedraw = true; } }
                                 }
                                 else if (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH) {
-                                    showAppProps = false; Console.Clear();
+                                    showAppProps = false; { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2935,7 +2955,7 @@ namespace OmniAdmin {
                                 int boxW = Math.Min(frameWidth - 4, 110), boxH = 14;
                                 int startX = (width - boxW) / 2, startY = (height - boxH) / 2;
                                 if ((my >= startY + boxH - 2 && my <= startY + boxH + 1 && mx >= startX && mx <= startX + 22) || (mx < startX || mx > startX + boxW || my < startY || my > startY + boxH)) {
-                                    showHistoryDetail = false; Console.Clear();
+                                    showHistoryDetail = false; { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -2946,7 +2966,7 @@ namespace OmniAdmin {
                             if (mx >= 1 && mx <= 9) { // Click on [≡ Menu] button
                                 showMainMenu = !showMainMenu;
                                 menuSelectedIndex = 0;
-                                Console.Clear();
+                                { System.Console.Clear(); forceRedraw = true; }
                             } else { // Click on view tabs
                                 string[] modeTabNames = new string[] { "Processes", "Services", "Tasks", "Apps", "Users", "SpeedTest", "History" };
                                 int curTabX = 11;
@@ -2966,7 +2986,7 @@ namespace OmniAdmin {
                                         selectedRow = 0;
                                         pageIndex = 0;
                                         filterText = "";
-                                        Console.Clear();
+                                        { System.Console.Clear(); forceRedraw = true; }
                                         break;
                                     }
                                     curTabX += tabW + 2;
@@ -3053,11 +3073,11 @@ namespace OmniAdmin {
                         if (activeMode == "History" && !historyConfigured) {
                             if (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick) {
                                 int pRow = my - (headerHeight + 4);
-                                if (pRow == 0) { historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
-                                else if (pRow == 1) { historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
-                                else if (pRow == 2) { historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
-                                else if (pRow == 3) { historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
-                                else if (pRow == 4) { historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; Console.Clear(); }
+                                if (pRow == 0) { historyDays = 1; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; } }
+                                else if (pRow == 1) { historyDays = 7; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; } }
+                                else if (pRow == 2) { historyDays = 14; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; } }
+                                else if (pRow == 3) { historyDays = 30; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; } }
+                                else if (pRow == 4) { historyDays = 90; historyConfigured = true; historyList = null; syncHash["HistoryData"] = null; { System.Console.Clear(); forceRedraw = true; } }
                                 else if (pRow == 5) {
                                     Console.CursorVisible = true;
                                     Console.SetCursorPosition(0, height - 1);
@@ -3072,7 +3092,7 @@ namespace OmniAdmin {
                                     }
                                     Console.CursorVisible = false;
                                     Console.SetCursorPosition(0, 0);
-                                    Console.Clear();
+                                    { System.Console.Clear(); forceRedraw = true; }
                                 }
                             }
                             continue;
@@ -3147,7 +3167,7 @@ namespace OmniAdmin {
 
             Console.Write("\x1b[?1049l"); // Restore Main Screen Buffer
             Console.CursorVisible = true;
-            Console.Clear();
+            { System.Console.Clear(); forceRedraw = true; }
         }
         
         public static List<object> GetProcessList(Hashtable syncHash) {

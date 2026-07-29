@@ -114,7 +114,7 @@ function Start-SystemMonitor {
         KillQueue         = [System.Collections.Concurrent.ConcurrentQueue[int]]::new()
         LogoffQueue       = [System.Collections.Concurrent.ConcurrentQueue[int]]::new()
         ServiceQueue      = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
-        TaskQueue         = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+        TaskQueue         = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
         # Data
         SysData           = $null
         UserData          = @()   

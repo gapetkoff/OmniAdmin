@@ -115,10 +115,14 @@ function Invoke-SystemMonitorWorker {
 
             $TaskToStart = $null
             while ($Sync.TaskQueue.TryDequeue([ref]$TaskToStart)) {
-                $Sb = { Start-ScheduledTask -TaskName $args[0] }
-                if ($IsLocal) { & $Sb $TaskToStart }
-                else { Invoke-Command -Session $Session -ScriptBlock $Sb -ArgumentList $TaskToStart }
-                $Sync.ActionStatus = "Started $TaskToStart"
+                $Sb = { 
+                    param($name, $path)
+                    if ($path) { Start-ScheduledTask -TaskName $name -TaskPath $path }
+                    else { Start-ScheduledTask -TaskName $name }
+                }
+                if ($IsLocal) { & $Sb $TaskToStart.Name $TaskToStart.Path }
+                else { Invoke-Command -Session $Session -ScriptBlock $Sb -ArgumentList $TaskToStart.Name, $TaskToStart.Path }
+                $Sync.ActionStatus = "Started $($TaskToStart.Name)"
             }
 
             # --- DATA FETCHING CONFIG ---
@@ -256,6 +260,7 @@ function Invoke-SystemMonitorWorker {
 
                                 [PSCustomObject]@{
                                     TaskName       = [string]$_.TaskName
+                                    TaskPath       = [string]$_.TaskPath
                                     State          = [string]$taskState
                                     LastRunTime    = $lastRun
                                     LastTaskResult = [string]$lastRes
