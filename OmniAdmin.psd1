@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'OmniAdmin.psm1'
-    ModuleVersion        = '1.0.1'
+    ModuleVersion        = '1.0.2'
     CompatiblePSEditions = 'Desktop', 'Core'
     GUID                 = '22991a0c-1234-4321-abcd-1234567890cd'
     Author               = 'Tony Petkoff'
@@ -16,7 +16,7 @@
         PSData = @{
             Tags         = @('Admin', 'Monitoring', 'Forensics', 'Network', 'Dashboard')
             ProjectUri   = 'https://github.com/gapetkoff/OmniAdmin'
-            ReleaseNotes = 'Added GitHub repository metadata and project links.'
+            ReleaseNotes = 'add quit to main menu. Fixed contrast issues with test on selected columns.'
         }
     }
 }
