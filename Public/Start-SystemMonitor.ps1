@@ -243,7 +243,7 @@ function Start-SystemMonitor {
         $TuiEnginePath = Join-Path $ModuleRoot "Private\TuiEngine.cs"
         if (Test-Path $TuiEnginePath) {
             if (-not ("OmniAdmin.TuiEngine" -as [type])) {
-                $TuiCode = Get-Content $TuiEnginePath -Raw
+                $TuiCode = Get-Content $TuiEnginePath -Raw -Encoding UTF8
                 Add-Type -TypeDefinition $TuiCode
             }
         } else {

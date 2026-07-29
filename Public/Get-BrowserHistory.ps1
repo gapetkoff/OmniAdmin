@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Extracts Chrome and Edge browsing history via SQLite.
 

@@ -1,4 +1,4 @@
-function Invoke-SystemMonitorWorker {
+﻿function Invoke-SystemMonitorWorker {
     param($Sync)
     
     $Session = $null

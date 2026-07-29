@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 using System.Collections;
 using System.Collections.Generic;
@@ -87,7 +87,7 @@ namespace OmniAdmin {
             if (filled < 0) filled = 0;
             if (filled > width) filled = width;
             
-            string bar = new string('█', filled) + new string('░', width - filled);
+            string bar = new string('\u2588', filled) + new string('\u2591', width - filled);
             if (percent >= 85) colorAnsi = "\x1b[31;1m"; // Bold Red
             else if (percent >= 60) colorAnsi = "\x1b[33;1m"; // Bold Yellow
             else colorAnsi = "\x1b[36;1m"; // Bold Cyan
@@ -99,7 +99,7 @@ namespace OmniAdmin {
             int visibleLength = GetVisibleLength(ansiContent);
             int pad = frameWidth - 4 - visibleLength;
             if (pad < 0) pad = 0;
-            return string.Format("{0}│\x1b[0m {1}{2} {0}│\x1b[0m\n", themeColor, ansiContent, new string(' ', pad));
+            return string.Format("{0}\u2502\x1b[0m {1}{2} {0}\u2502\x1b[0m\n", themeColor, ansiContent, new string(' ', pad));
         }
 
         public static int GetVisibleLength(string text) {
@@ -483,11 +483,11 @@ namespace OmniAdmin {
                     var sb2 = new StringBuilder();
                     sb2.Append("\x1b[H\x1b[0m");
                     int cw2 = width - 1;
-                    string dBorder = new string('═', cw2);
+                    string dBorder = new string('\u2550', cw2);
 
                     // Header
                     sb2.Append("\x1b[31m" + dBorder + "\x1b[0m\n");
-                    sb2.Append("\x1b[31m  ⚠  CONNECTION LOST\x1b[0m".PadRight(cw2 + 10) + "\n");
+                    sb2.Append("\x1b[31m  \u26A0  CONNECTION LOST\x1b[0m".PadRight(cw2 + 10) + "\n");
                     sb2.Append("\x1b[31m" + dBorder + "\x1b[0m\n");
                     sb2.Append("\n");
 
@@ -518,7 +518,7 @@ namespace OmniAdmin {
 
                     sb2.Append(string.Format("\x1b[36m  {0} Elapsed: {1}   Attempt: {2}\x1b[0m\n", spin, elapsedStr, attempt));
                     sb2.Append("\n");
-                    sb2.Append("\x1b[90m" + new string('─', cw2) + "\x1b[0m\n");
+                    sb2.Append("\x1b[90m" + new string('\u2500', cw2) + "\x1b[0m\n");
                     sb2.Append("\x1b[32m  Waiting for host to come back online...\x1b[0m\n");
                     sb2.Append("\n");
                     sb2.Append("\x1b[40m\x1b[31m  [Q] Quit \x1b[0m\n");
@@ -546,7 +546,7 @@ namespace OmniAdmin {
                     { System.Console.Clear(); forceRedraw = true; }
                     Console.CursorVisible = false;
                     int cw = Console.WindowWidth;
-                    string border = new string('═', Math.Max(0, cw - 1));
+                    string border = new string('\u2550', Math.Max(0, cw - 1));
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine(border);
                     Console.WriteLine("  CONNECTION FAILED".PadRight(cw - 1));
@@ -760,7 +760,7 @@ namespace OmniAdmin {
                         footerItems = new string[] { "\x1b[94;1m[Up/Dn]\x1b[0m Row", "\x1b[94;1m[<-/->]\x1b[0m Page", "\x1b[94;1m[S]\x1b[0m Search", "\x1b[94;1m[P]\x1b[0m Details", "\x1b[94;1m[E]\x1b[0m Export", "\x1b[94;1m[M]\x1b[0m Menu", "\x1b[94;1m[ESC]\x1b[0m Back" };
                 }
 
-                string singleLineFooter = " " + string.Join("  \x1b[90m│\x1b[0m  ", footerItems);
+                string singleLineFooter = " " + string.Join("  \x1b[90m\u2502\x1b[0m  ", footerItems);
                 int visSingleLen = GetVisibleLength(singleLineFooter);
 
                 string footerLine1 = "";
@@ -792,8 +792,8 @@ namespace OmniAdmin {
                         r2.Add(footerItems[itemIdx]);
                         itemIdx++;
                     }
-                    footerLine1 = " " + string.Join("  \x1b[90m│\x1b[0m  ", r1.ToArray());
-                    footerLine2 = " " + string.Join("  \x1b[90m│\x1b[0m  ", r2.ToArray());
+                    footerLine1 = " " + string.Join("  \x1b[90m\u2502\x1b[0m  ", r1.ToArray());
+                    footerLine2 = " " + string.Join("  \x1b[90m\u2502\x1b[0m  ", r2.ToArray());
                 }
 
                 int totalFooterHeight = 1 + footerLinesCount; // 1 top separator + footerLinesCount menu text lines
@@ -952,7 +952,7 @@ namespace OmniAdmin {
                 // Row 0: Standalone Top Menu Bar (Solid Blue MS Edit Style)
                 StringBuilder topMenuSb = new StringBuilder();
                 bool isMenuBtnHover = (hoverMy == 0 && hoverMx >= 1 && hoverMx <= 9);
-                topMenuSb.Append("\x1b[44;37m " + (isMenuBtnHover ? "\x1b[30;46;1m ≡ Menu \x1b[0m\x1b[44;37m  " : "\x1b[1;30;47m ≡ Menu \x1b[0m\x1b[44;37m  "));
+                topMenuSb.Append("\x1b[44;37m " + (isMenuBtnHover ? "\x1b[30;46;1m \u2261 Menu \x1b[0m\x1b[44;37m  " : "\x1b[1;30;47m \u2261 Menu \x1b[0m\x1b[44;37m  "));
                 
                 int curMenuX = 12;
                 string[] modeNames = new string[] { "Processes", "Services", "Tasks", "Apps", "Users", "SpeedTest", "History" };
@@ -981,14 +981,14 @@ namespace OmniAdmin {
 
                 // Row 2: System Monitor Box Header
                 int boxPad = Math.Max(0, frameWidth - 21);
-                sb.Append(themeColor + "┌─── " + "\x1b[1;97mSYSTEM MONITOR\x1b[0m " + themeColor + new string('─', boxPad) + "┐\x1b[0m\n");
+                sb.Append(themeColor + "\u250C\u2500\u2500\u2500 " + "\x1b[1;97mSYSTEM MONITOR\x1b[0m " + themeColor + new string('\u2500', boxPad) + "\u2510\x1b[0m\n");
 
                 // 2. Stats Bar
                 object sysData = syncHash["SysData"];
                 if (staticData != null && sysData != null) {
                     string cpuName = GetString(staticData, "CpuName");
                     string cores = GetString(staticData, "Cores");
-                    string ansiCPU = string.Format("\x1b[1mCPU\x1b[0m  {0} \x1b[90m│\x1b[0m {1} Cores", cpuName, cores);
+                    string ansiCPU = string.Format("\x1b[1mCPU\x1b[0m  {0} \x1b[90m\u2502\x1b[0m {1} Cores", cpuName, cores);
                     sb.Append(FormatBoxLine(ansiCPU, frameWidth, themeColor));
 
                     if (GetProperty(staticData, "GpuName") != null) {
@@ -1005,7 +1005,7 @@ namespace OmniAdmin {
                         var span = DateTime.Now - bootTime;
                         uptimeStr = string.Format("{0}d {1}h {2}m", span.Days, span.Hours, span.Minutes);
                     }
-                    string ansiRAM = string.Format("\x1b[1mRAM\x1b[0m  {0} GB Total \x1b[90m│\x1b[0m Uptime: {1}", totalRam, uptimeStr);
+                    string ansiRAM = string.Format("\x1b[1mRAM\x1b[0m  {0} GB Total \x1b[90m\u2502\x1b[0m Uptime: {1}", totalRam, uptimeStr);
                     sb.Append(FormatBoxLine(ansiRAM, frameWidth, themeColor));
 
                     double cpuLoad = GetDouble(sysData, "CpuLoad");
@@ -1037,7 +1037,7 @@ namespace OmniAdmin {
                         sb.Append(FormatBoxLine(ansiLoad2, frameWidth, themeColor));
                     }
 
-                    string ansiNet = string.Format("\x1b[1mNET\x1b[0m  Up: {0} Mbps \x1b[90m│\x1b[0m Dn: {1} Mbps  \x1b[90m│\x1b[0m  \x1b[1mIO\x1b[0m  Write: {2} MB/s \x1b[90m│\x1b[0m Read: {3} MB/s", GetProperty(sysData, "UpMbps"), GetProperty(sysData, "DnMbps"), GetProperty(sysData, "DiskWrite"), GetProperty(sysData, "DiskRead"));
+                    string ansiNet = string.Format("\x1b[1mNET\x1b[0m  Up: {0} Mbps \x1b[90m\u2502\x1b[0m Dn: {1} Mbps  \x1b[90m\u2502\x1b[0m  \x1b[1mIO\x1b[0m  Write: {2} MB/s \x1b[90m\u2502\x1b[0m Read: {3} MB/s", GetProperty(sysData, "UpMbps"), GetProperty(sysData, "DnMbps"), GetProperty(sysData, "DiskWrite"), GetProperty(sysData, "DiskRead"));
                     sb.Append(FormatBoxLine(ansiNet, frameWidth, themeColor));
 
                     int pCount = 0;
@@ -1050,7 +1050,7 @@ namespace OmniAdmin {
                     int uCount = 0;
                     var userDataList = Unwrap(syncHash["UserData"]) as ICollection;
                     if (userDataList != null) uCount = userDataList.Count;
-                    string ansiSys = string.Format("\x1b[1mSYS\x1b[0m  Processes: {0} \x1b[90m│\x1b[0m Threads: {1} \x1b[90m│\x1b[0m Users: {2}", pCount, tCount, uCount);
+                    string ansiSys = string.Format("\x1b[1mSYS\x1b[0m  Processes: {0} \x1b[90m\u2502\x1b[0m Threads: {1} \x1b[90m\u2502\x1b[0m Users: {2}", pCount, tCount, uCount);
                     sb.Append(FormatBoxLine(ansiSys, frameWidth, themeColor));
 
                     string actionStatus = GetString(syncHash["ActionStatus"]);
@@ -1072,7 +1072,7 @@ namespace OmniAdmin {
                         sb.Append(FormatBoxLine("", frameWidth, themeColor));
                     }
                 }
-                sb.Append(themeColor + "└" + new string('─', frameWidth - 2) + "┘\x1b[0m\n");
+                sb.Append(themeColor + "\u2514" + new string('\u2500', frameWidth - 2) + "\u2518\x1b[0m\n");
 
                 // Render Page Navigation & Pause Header Bar
                 if (activeMode != "SpeedTest") {
@@ -1081,16 +1081,16 @@ namespace OmniAdmin {
                     bool nextHover = isNavHover && (hoverMx >= 20 && hoverMx <= 29);
                     bool pauseHover = isNavHover && (hoverMx >= 30 && hoverMx <= 55);
 
-                    string prevBtn = prevHover ? "\x1b[1;30;46m ◄ PREV \x1b[0m" : "\x1b[1;37;44m ◄ PREV \x1b[0m";
-                    string nextBtn = nextHover ? "\x1b[1;30;46m NEXT ► \x1b[0m" : "\x1b[1;37;44m NEXT ► \x1b[0m";
+                    string prevBtn = prevHover ? "\x1b[1;30;46m \u25C4 PREV \x1b[0m" : "\x1b[1;37;44m \u25C4 PREV \x1b[0m";
+                    string nextBtn = nextHover ? "\x1b[1;30;46m NEXT \u25BA \x1b[0m" : "\x1b[1;37;44m NEXT \u25BA \x1b[0m";
                     string pageDisp = string.Format(" \x1b[1;37mPage {0} of {1}\x1b[0m ", pageIndex + 1, maxPages);
 
                     string pauseBtn = "";
                     if (activeMode == "Processes") {
                         if (pauseHover) {
-                            pauseBtn = paused ? " \x1b[30;46;1m [▶ RESUME UPDATES] \x1b[0m" : " \x1b[30;43;1m [⏸ PAUSE TO KILL] \x1b[0m";
+                            pauseBtn = paused ? " \x1b[30;46;1m [\u25B6 RESUME UPDATES] \x1b[0m" : " \x1b[30;43;1m [\u23F8 PAUSE TO KILL] \x1b[0m";
                         } else {
-                            pauseBtn = paused ? " \x1b[43;30;1m [▶ RESUME UPDATES] \x1b[0m" : " \x1b[41;37;1m [⏸ PAUSE TO KILL] \x1b[0m";
+                            pauseBtn = paused ? " \x1b[43;30;1m [\u25B6 RESUME UPDATES] \x1b[0m" : " \x1b[41;37;1m [\u23F8 PAUSE TO KILL] \x1b[0m";
                         }
                     }
 
@@ -1108,12 +1108,12 @@ namespace OmniAdmin {
                     int stBodyBudget = height - headerHeight - 2;
                     int stLinesDrawn = 0;
 
-                    void AppendST(string line) { sb.Append(line); stLinesDrawn++; }
+                    Action<string> AppendST = (line) => { sb.Append(line); stLinesDrawn++; };
 
                     // Render Speed Test Form & Gauge
                     AppendST("  NETWORK SPEED TEST CONFIGURATION & RESULTS".PadRight(frameWidth) + "\n");
                     AppendST(" ".PadRight(frameWidth) + "\n");
-                    AppendST("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
+                    AppendST("\x1b[90m" + new string('\u2500', frameWidth) + "\x1b[0m\n");
                     AppendST("  SETTINGS".PadRight(frameWidth) + "\n");
 
                     // Row 0: Test Mode
@@ -1280,7 +1280,7 @@ namespace OmniAdmin {
                         }
                         
                         if (i < colHeaders.Length - 1) {
-                            sb.Append("\x1b[90m│\x1b[0m");
+                            sb.Append("\x1b[90m\u2502\x1b[0m");
                         }
                         curColX += colWidths[i] + 1;
                     }
@@ -1385,7 +1385,7 @@ namespace OmniAdmin {
                                 string hndStr = GetString(item, "HandleCount");
                                 if (hndStr.Length > colWidths[5]) hndStr = hndStr.Substring(0, colWidths[5]);
 
-                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2," + colWidths[2] + "}│{3," + colWidths[3] + "}│{4," + colWidths[4] + "}│{5," + colWidths[5] + "}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}\u2502{1,-" + colWidths[1] + "}\u2502{2," + colWidths[2] + "}\u2502{3," + colWidths[3] + "}\u2502{4," + colWidths[4] + "}\u2502{5," + colWidths[5] + "}",
                                     pidStr, pName, cpuStr, memStr, thrStr, hndStr);
                                     
                                 if (cpuVal > 75) fg = "\x1b[31m"; // Red
@@ -1397,7 +1397,7 @@ namespace OmniAdmin {
                                 bool isHoveredRow = (i == hoverRow);
 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m\u25B6 {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else if (isHoveredRow) {
                                     sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
@@ -1416,7 +1416,7 @@ namespace OmniAdmin {
                                 string startTypeStr = GetString(item, "StartType");
                                 if (startTypeStr.Length > colWidths[3]) startTypeStr = startTypeStr.Substring(0, colWidths[3]);
 
-                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}\u2502{1,-" + colWidths[1] + "}\u2502{2,-" + colWidths[2] + "}\u2502{3,-" + colWidths[3] + "}",
                                     statusStr, sName, dName, startTypeStr);
                                 
                                 if (status == "Running") fg = "\x1b[32m"; // Green
@@ -1427,7 +1427,7 @@ namespace OmniAdmin {
                                 bool isHoveredRow = (i == hoverRow);
 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m\u25B6 {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else if (isHoveredRow) {
                                     sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
@@ -1451,7 +1451,7 @@ namespace OmniAdmin {
                                 string resStr = res;
                                 if (resStr.Length > colWidths[3]) resStr = resStr.Substring(0, colWidths[3]);
 
-                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}\u2502{1,-" + colWidths[1] + "}\u2502{2,-" + colWidths[2] + "}\u2502{3,-" + colWidths[3] + "}",
                                     stateStr, tName, last, resStr);
                                     
                                 if (state == "Running") fg = "\x1b[32m"; // Green
@@ -1462,12 +1462,12 @@ namespace OmniAdmin {
                                 bool isHoveredRow = (i == hoverRow && !showContextMenu && !showMainMenu);
 
                                 if (i == selectedRow && !showTaskProps) {
-                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m\u25B6 {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else if (isHoveredRow && !showTaskProps) {
                                     sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     string resColor = (res == "0") ? "\x1b[32m" : "\x1b[31m"; // Green for 0, Red for others
-                                    int sepIdx = line.LastIndexOf('│');
+                                    int sepIdx = line.LastIndexOf('\u2502');
                                     if (sepIdx >= 0) {
                                         string baseLine = line.Substring(0, sepIdx + 1);
                                         string resultCell = line.Substring(sepIdx + 1).PadRight(frameWidth - sepIdx - 1);
@@ -1489,14 +1489,14 @@ namespace OmniAdmin {
                                 string date = GetString(item, "InstallDate");
                                 date = date.PadRight(colWidths[4]).Substring(0, colWidths[4]);
                                 
-                                line = "  " + aName + "│" + ver + "│" + pub + "│" + type + "│" + date;
+                                line = "  " + aName + "\u2502" + ver + "\u2502" + pub + "\u2502" + type + "\u2502" + date;
                                 line = line.PadRight(frameWidth).Substring(0, frameWidth);
                                 
                                 int hoverRow = hoverMy - (headerHeight + 2);
                                 bool isHoveredRow = (i == hoverRow);
 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m\u25B6 {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else if (isHoveredRow) {
                                     sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
@@ -1517,12 +1517,12 @@ namespace OmniAdmin {
                                 string logon = GetString(item, "LogonTime");
                                 if (logon.Length > colWidths[5]) logon = logon.Substring(0, colWidths[5]);
                                 
-                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}│{4,-" + colWidths[4] + "}│{5,-" + colWidths[5] + "}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}\u2502{1,-" + colWidths[1] + "}\u2502{2,-" + colWidths[2] + "}\u2502{3,-" + colWidths[3] + "}\u2502{4,-" + colWidths[4] + "}\u2502{5,-" + colWidths[5] + "}",
                                     uName, sName, sid, state, idle, logon);
                                 if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
                                 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m\u25B6 {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
                                     sb.Append(string.Format("\x1b[37m{0}\x1b[0m", line.PadRight(frameWidth)) + "\n");
                                 }
@@ -1548,7 +1548,7 @@ namespace OmniAdmin {
                                 string url = GetString(item, "URL");
                                 if (url.Length > colWidths[4]) url = url.Substring(0, colWidths[4]);
 
-                                line = string.Format("  {0,-" + colWidths[0] + "}│{1,-" + colWidths[1] + "}│{2,-" + colWidths[2] + "}│{3,-" + colWidths[3] + "}│{4,-" + colWidths[4] + "}",
+                                line = string.Format("  {0,-" + colWidths[0] + "}\u2502{1,-" + colWidths[1] + "}\u2502{2,-" + colWidths[2] + "}\u2502{3,-" + colWidths[3] + "}\u2502{4,-" + colWidths[4] + "}",
                                     timeStr, uName, browser, title, url);
                                 if (line.Length > frameWidth) line = line.Substring(0, frameWidth);
 
@@ -1556,7 +1556,7 @@ namespace OmniAdmin {
                                 bool isHoveredRow = (i == hoverRow && !showHistoryDetail && !showMainMenu);
 
                                 if (i == selectedRow) {
-                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m▶ {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
+                                    sb.Append(string.Format("\x1b[48;5;24m\x1b[97;1m\u25B6 {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else if (isHoveredRow) {
                                     sb.Append(string.Format("\x1b[48;5;238m\x1b[97;1m  {0}\x1b[0m", line.Substring(2).PadRight(frameWidth - 2)) + "\n");
                                 } else {
@@ -1604,7 +1604,7 @@ namespace OmniAdmin {
                 }
 
                 // 3. Footer Separator and Menu Bar
-                sb.Append("\x1b[90m" + new string('─', frameWidth) + "\x1b[0m\n");
+                sb.Append("\x1b[90m" + new string('\u2500', frameWidth) + "\x1b[0m\n");
 
                 if (footerLinesCount == 1) {
                     sb.Append(CenterAnsi(footerLine1, frameWidth));
@@ -1912,15 +1912,15 @@ namespace OmniAdmin {
                     }
                 }
 
-                // 7. Main Menu Overlay (Dropdown beneath [≡ Menu] button)
+                // 7. Main Menu Overlay (Dropdown beneath [\u2261 Menu] button)
                 if (showMainMenu) {
                     int boxW = 36;
                     int startX = 1;
                     int startY = 1;
 
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m┌──────────────────────────────────┐\x1b[0m", startY + 1, startX + 1));
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│ \x1b[1m≡ NAVIGATION MENU\x1b[0;37;44m                │\x1b[0m", startY + 2, startX + 1));
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m├──────────────────────────────────┤\x1b[0m", startY + 3, startX + 1));
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\x1b[0m", startY + 1, startX + 1));
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2502 \x1b[1m\u2261 NAVIGATION MENU\x1b[0;37;44m                \u2502\x1b[0m", startY + 2, startX + 1));
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\x1b[0m", startY + 3, startX + 1));
                     
                     string[] items = new string[] {
                         "  [1] Live Processes",
@@ -1935,13 +1935,13 @@ namespace OmniAdmin {
                     for (int i = 0; i < items.Length; i++) {
                         sb.Append(string.Format("\x1b[{0};{1}H", startY + 4 + i, startX + 1));
                         if (i == menuSelectedIndex) {
-                            sb.Append(string.Format("\x1b[37;44m│ \x1b[30;47m{0}\x1b[0m\x1b[37;44m │\x1b[0m", items[i].PadRight(boxW - 4)));
+                            sb.Append(string.Format("\x1b[37;44m\u2502 \x1b[30;47m{0}\x1b[0m\x1b[37;44m \u2502\x1b[0m", items[i].PadRight(boxW - 4)));
                         } else {
-                            sb.Append(string.Format("\x1b[37;44m│ {0} │\x1b[0m", items[i].PadRight(boxW - 4)));
+                            sb.Append(string.Format("\x1b[37;44m\u2502 {0} \u2502\x1b[0m", items[i].PadRight(boxW - 4)));
                         }
                     }
 
-                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m└──────────────────────────────────┘\x1b[0m", startY + 4 + items.Length, startX + 1));
+                    sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\x1b[0m", startY + 4 + items.Length, startX + 1));
                 }
 
                 // 8. Context Menus
@@ -1955,7 +1955,7 @@ namespace OmniAdmin {
                         string pTitle = string.Format(" PROCESS: {0} ({1}) ", nameClean, contextMenuPid);
 
                         // Row 0: Top frame border with title
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u250C{2}\u2510\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '\u2500')));
 
                         // Options
                         string killLabel = string.Format(" [K] Kill Process (PID {0}) ", contextMenuPid);
@@ -1970,16 +1970,16 @@ namespace OmniAdmin {
                         for (int i = 0; i < options.Length; i++) {
                             string optStr = options[i].PadRight(boxW - 2);
                             if (i == 0) {
-                                if (contextMenuSelectedIndex == i) sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│\x1b[41;97;1m{2}\x1b[37;44m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
-                                else sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│\x1b[31;44m{2}\x1b[37;44m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                if (contextMenuSelectedIndex == i) sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2502\x1b[41;97;1m{2}\x1b[37;44m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                else sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2502\x1b[31;44m{2}\x1b[37;44m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             } else {
-                                if (contextMenuSelectedIndex == i) sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│\x1b[30;47m{2}\x1b[37;44m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
-                                else sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m│{2}│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                if (contextMenuSelectedIndex == i) sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2502\x1b[30;47m{2}\x1b[37;44m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                else sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2502{2}\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             }
                         }
 
                         // Bottom border
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m└{2}┘\x1b[0m", startY + 7, startX + 1, new string('─', boxW - 2)));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;44m\u2514{2}\u2518\x1b[0m", startY + 7, startX + 1, new string('\u2500', boxW - 2)));
                     }
                     else if (contextMenuType == "Service") {
                         int boxW = 34, boxH = 7;
@@ -1990,7 +1990,7 @@ namespace OmniAdmin {
                         string pTitle = string.Format(" SERVICE: {0} ", nameClean);
 
                         // Row 0: Top frame border with title
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m\u250C{2}\u2510\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '\u2500')));
 
                         string[] options = new string[] {
                             " [S] Start Service ",
@@ -2005,14 +2005,14 @@ namespace OmniAdmin {
                         for (int i = 0; i < options.Length; i++) {
                             string optStr = options[i].PadRight(boxW - 2);
                             if (contextMenuSelectedIndex == i) {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m│\x1b[30;47m{2}\x1b[30;43m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m\u2502\x1b[30;47m{2}\x1b[30;43m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             } else {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m│{2}│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m\u2502{2}\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             }
                         }
 
                         // Bottom border
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m└{2}┘\x1b[0m", startY + options.Length + 2, startX + 1, new string('─', boxW - 2)));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;43m\u2514{2}\u2518\x1b[0m", startY + options.Length + 2, startX + 1, new string('\u2500', boxW - 2)));
                     }
                     else if (contextMenuType == "Task") {
                         int boxW = 34, boxH = 5;
@@ -2023,7 +2023,7 @@ namespace OmniAdmin {
                         string pTitle = string.Format(" TASK: {0} ", nameClean);
 
                         // Row 0: Top frame border with title
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u250C{2}\u2510\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '\u2500')));
 
                         string[] options = new string[] {
                             " [S] Start Task ",
@@ -2036,14 +2036,14 @@ namespace OmniAdmin {
                         for (int i = 0; i < options.Length; i++) {
                             string optStr = options[i].PadRight(boxW - 2);
                             if (contextMenuSelectedIndex == i) {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m│\x1b[30;47m{2}\x1b[30;46m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u2502\x1b[30;47m{2}\x1b[30;46m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             } else {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m│{2}│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u2502{2}\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             }
                         }
 
                         // Bottom border
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m└{2}┘\x1b[0m", startY + options.Length + 2, startX + 1, new string('─', boxW - 2)));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u2514{2}\u2518\x1b[0m", startY + options.Length + 2, startX + 1, new string('\u2500', boxW - 2)));
                     }
                     else if (contextMenuType == "User") {
                         int boxW = 34, boxH = 4;
@@ -2054,7 +2054,7 @@ namespace OmniAdmin {
                         string pTitle = string.Format(" USER: {0} ", nameClean);
 
                         // Row 0: Top frame border with title
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m\u250C{2}\u2510\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '\u2500')));
 
                         string[] options = new string[] {
                             " [L] Logoff User ",
@@ -2067,14 +2067,14 @@ namespace OmniAdmin {
                         for (int i = 0; i < options.Length; i++) {
                             string optStr = options[i].PadRight(boxW - 2);
                             if (contextMenuSelectedIndex == i) {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m│\x1b[30;47m{2}\x1b[30;45m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m\u2502\x1b[30;47m{2}\x1b[30;45m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             } else {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m│{2}│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m\u2502{2}\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             }
                         }
 
                         // Bottom border
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m└{2}┘\x1b[0m", startY + options.Length + 2, startX + 1, new string('─', boxW - 2)));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;45m\u2514{2}\u2518\x1b[0m", startY + options.Length + 2, startX + 1, new string('\u2500', boxW - 2)));
                     }
                     else if (contextMenuType == "App") {
                         int boxW = 34, boxH = 5;
@@ -2085,7 +2085,7 @@ namespace OmniAdmin {
                         string pTitle = string.Format(" APP: {0} ", nameClean);
 
                         // Row 0: Top frame border with title
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m\u250C{2}\u2510\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '\u2500')));
 
                         string[] options = new string[] {
                             " [V] View Details ",
@@ -2096,14 +2096,14 @@ namespace OmniAdmin {
                         for (int i = 0; i < options.Length; i++) {
                             string optStr = options[i].PadRight(boxW - 2);
                             if (contextMenuSelectedIndex == i) {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m│\x1b[30;47m{2}\x1b[37;42m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m\u2502\x1b[30;47m{2}\x1b[37;42m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             } else {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m│{2}│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m\u2502{2}\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             }
                         }
 
                         // Bottom border
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m└{2}┘\x1b[0m", startY + options.Length + 2, startX + 1, new string('─', boxW - 2)));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[37;42m\u2514{2}\u2518\x1b[0m", startY + options.Length + 2, startX + 1, new string('\u2500', boxW - 2)));
                     }
                     else if (contextMenuType == "History") {
                         int boxW = 34, boxH = 5;
@@ -2114,7 +2114,7 @@ namespace OmniAdmin {
                         string pTitle = string.Format(" HISTORY: {0} ", nameClean);
 
                         // Row 0: Top frame border with title
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m┌{2}┐\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '─')));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u250C{2}\u2510\x1b[0m", startY + 1, startX + 1, pTitle.PadRight(boxW - 2, '\u2500')));
 
                         string[] options = new string[] {
                             " [V] View Details ",
@@ -2125,14 +2125,14 @@ namespace OmniAdmin {
                         for (int i = 0; i < options.Length; i++) {
                             string optStr = options[i].PadRight(boxW - 2);
                             if (contextMenuSelectedIndex == i) {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m│\x1b[30;47m{2}\x1b[30;46m│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u2502\x1b[30;47m{2}\x1b[30;46m\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             } else {
-                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m│{2}│\x1b[0m", startY + 2 + i, startX + 1, optStr));
+                                sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u2502{2}\u2502\x1b[0m", startY + 2 + i, startX + 1, optStr));
                             }
                         }
 
                         // Bottom border
-                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m└{2}┘\x1b[0m", startY + 5, startX + 1, new string('─', boxW - 2)));
+                        sb.Append(string.Format("\x1b[{0};{1}H\x1b[30;46m\u2514{2}\u2518\x1b[0m", startY + 5, startX + 1, new string('\u2500', boxW - 2)));
                     }
                 }
 
@@ -2838,7 +2838,7 @@ namespace OmniAdmin {
                             continue;
                         }
 
-                        // 3. Main Menu Overlay Interaction (Dropdown beneath [≡ Menu])
+                        // 3. Main Menu Overlay Interaction (Dropdown beneath [\u2261 Menu])
                         if (showMainMenu) {
                             int boxW = 36;
                             int startX = 1;
@@ -2961,9 +2961,9 @@ namespace OmniAdmin {
                             continue;
                         }
 
-                        // 5. Top Menu Bar Click (Row 0) -> [≡ Menu] Button & View Tabs
+                        // 5. Top Menu Bar Click (Row 0) -> [\u2261 Menu] Button & View Tabs
                         if (my == 0 && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
-                            if (mx >= 1 && mx <= 9) { // Click on [≡ Menu] button
+                            if (mx >= 1 && mx <= 9) { // Click on [\u2261 Menu] button
                                 showMainMenu = !showMainMenu;
                                 menuSelectedIndex = 0;
                                 { System.Console.Clear(); forceRedraw = true; }
@@ -2999,7 +2999,7 @@ namespace OmniAdmin {
                         if (activeMode == "SpeedTest") {
                             if (ToBool(st["Running"])) continue;
                             int startBtnIdx = isLocal ? 3 : 4;
-                            int MapSpeedTestRow(int mouseY) {
+                            Func<int, int> MapSpeedTestRow = (mouseY) => {
                                 int visualRow = mouseY - (headerHeight + 3);
                                 if (visualRow >= 0 && visualRow <= 2) return visualRow;
                                 if (isLocal) {
@@ -3009,7 +3009,7 @@ namespace OmniAdmin {
                                     if (visualRow == 5) return 4; // Start button
                                 }
                                 return -1;
-                            }
+                            };
 
                             if (evt.Type == InputEventType.MouseMove) {
                                 int stRow = MapSpeedTestRow(my);
@@ -3100,11 +3100,11 @@ namespace OmniAdmin {
 
                         // 8a. Page Navigation & Pause Header Bar Click (Row headerHeight)
                         if ((my == headerHeight - 1 || my == headerHeight - 2) && activeMode != "SpeedTest" && (evt.Type == InputEventType.MouseClick || evt.Type == InputEventType.MouseDoubleClick)) {
-                            if (mx >= 1 && mx <= 9) { // ◄ PREV button
+                            if (mx >= 1 && mx <= 9) { // \u25C4 PREV button
                                 if (pageIndex > 0) { pageIndex--; selectedRow = 0; }
-                            } else if (mx >= 20 && mx <= 29) { // NEXT ► button
+                            } else if (mx >= 20 && mx <= 29) { // NEXT \u25BA button
                                 if (pageIndex < maxPages - 1) { pageIndex++; selectedRow = 0; }
-                            } else if (activeMode == "Processes" && mx >= 30 && mx <= 52) { // [⏸ PAUSE TO KILL] / [▶ RESUME UPDATES] button
+                            } else if (activeMode == "Processes" && mx >= 30 && mx <= 52) { // [\u23F8 PAUSE TO KILL] / [\u25B6 RESUME UPDATES] button
                                 paused = !paused;
                                 if (paused) {
                                     var raw = GetProcessList(syncHash);
