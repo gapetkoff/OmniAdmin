@@ -1,0 +1,17 @@
+name: Publish to PowerShell Gallery
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Publish Module
+        shell: pwsh
+        run: |
+          Publish-Module -Path ./ -NuGetApiKey ${{ secrets.PSGALLERY_API_KEY }}
