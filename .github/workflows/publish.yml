@@ -14,4 +14,4 @@ jobs:
       - name: Publish Module
         shell: pwsh
         run: |
-          Publish-Module -Path ./ -NuGetApiKey ${{ secrets.PSGALLERY_API_KEY }}
+          Publish-Module -Path ./ -NuGetApiKey ${{ secrets.PUSH_TO_PSGALLERY }}
